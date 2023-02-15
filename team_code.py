@@ -138,7 +138,7 @@ def save_challenge_model(model_folder, imputer, outcome_model, cpc_model):
     joblib.dump(d, filename, protocol=0)
 
 # Extract features from the data.
-def get_features(patient_metadata, recording_metadata, recording_data):
+def get_features(patient_metadata, recording_metadata, recording_data, return_as_dict=False, max_hours=73, min_quality=0.0):
     # Extract features from the patient metadata.
     age = get_age(patient_metadata)
     sex = get_sex(patient_metadata)
@@ -164,6 +164,7 @@ def get_features(patient_metadata, recording_metadata, recording_data):
 
     # Combine the patient features.
     patient_features = np.array([age, female, male, other, rosc, ohca, vfib, ttm])
+    patient_features_dict = {"age": age, "female": female, "male": male, "other": other, "rosc": rosc, "ohca": ohca, "vfib": vfib, "ttm": ttm}
 
     # Extract features from the recording data and metadata.
     channels = ['Fp1-F7', 'F7-T3', 'T3-T5', 'T5-O1', 'Fp2-F8', 'F8-T4', 'T4-T6', 'T6-O2', 'Fp1-F3',
@@ -171,13 +172,16 @@ def get_features(patient_metadata, recording_metadata, recording_data):
     num_channels = len(channels)
     num_recordings = len(recording_data)
 
-    # Compute mean and standard deviation for each channel for each recording.
+    # Compute mean and standard deviation for each channel over all recordings
     available_signal_data = list()
     for i in range(num_recordings):
         signal_data, sampling_frequency, signal_channels = recording_data[i]
         if signal_data is not None:
-            signal_data = reorder_recording_channels(signal_data, signal_channels, channels) # Reorder the channels in the signal data, as needed, for consistency across different recordings.
-            available_signal_data.append(signal_data)
+            quality = get_quality_scores(recording_metadata)[i]
+            hour = get_hours(recording_metadata)[i]
+            if (quality >= min_quality) and (hour <= max_hours):
+                signal_data = reorder_recording_channels(signal_data, signal_channels, channels) # Reorder the channels in the signal data, as needed, for consistency across different recordings.
+                available_signal_data.append(signal_data)
 
     if len(available_signal_data) > 0:
         available_signal_data = np.hstack(available_signal_data)
@@ -187,14 +191,17 @@ def get_features(patient_metadata, recording_metadata, recording_data):
         signal_mean = float('nan') * np.ones(num_channels)
         signal_std  = float('nan') * np.ones(num_channels)
 
-    # Compute the power spectral density for the delta, theta, alpha, and beta frequency bands for each channel of the most
-    # recent recording.
+    # Compute the power spectral density for the delta, theta, alpha, and beta frequency bands for each channel 
+    # of the MOST RECENT recording.
     index = None
     for i in reversed(range(num_recordings)):
         signal_data, sampling_frequency, signal_channels = recording_data[i]
         if signal_data is not None:
-            index = i
-            break
+            quality = get_quality_scores(recording_metadata)[i]
+            hour = get_hours(recording_metadata)[i]
+            if (quality >= min_quality) and (hour <= max_hours):
+                index = i
+                break
 
     if index is not None:
         signal_data, sampling_frequency, signal_channels = recording_data[index]
@@ -216,8 +223,17 @@ def get_features(patient_metadata, recording_metadata, recording_data):
         quality_score = float('nan')
 
     recording_features = np.hstack((signal_mean, signal_std, delta_psd_mean, theta_psd_mean, alpha_psd_mean, beta_psd_mean, quality_score))
+    recording_features_dict = {"quality_score": quality_score}
+    for s in ["signal_mean", "signal_std", "delta_psd_mean", "theta_psd_mean", "alpha_psd_mean", "beta_psd_mean"]:
+        for i, c in enumerate(channels):
+            recording_features_dict[s + "_" + c] = eval(s)[i]
 
     # Combine the features from the patient metadata and the recording data and metadata.
     features = np.hstack((patient_features, recording_features))
+    features_dict = patient_features_dict
+    features_dict.update(recording_features_dict)
 
-    return features
+    if return_as_dict:
+        return features_dict
+    else:
+        return features
