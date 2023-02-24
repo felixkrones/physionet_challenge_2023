@@ -8,13 +8,33 @@ We implemented a ... model with several features.
 
 This code uses four main scripts, described below, to train and run a model for the Challenge.
 
+The [Challenge website](https://physionetchallenges.org/2023/#data) provides a training database with a description of the contents and structure of the data files.
+
 ## How do I run these scripts?
+
+### 0. Dependencies
 
 You can install the dependencies for these scripts by creating a Docker image (see below) and running
 
-    pip install requirements.txt
+    pip install -r requirements.txt
 
-You can train you model by running
+
+### 1. Data
+
+Download the challenge data:
+1. Create and jump into data folder: `mkdir 00_raw && cd 00_raw`
+2. Download: `wget -r -N -c -np https://physionet.org/files/i-care/1.0/`
+
+
+### 2. Split data
+
+Run the following notebook:
+
+    split_data.ipynb
+
+### 3. Train
+
+You can train your model by running
 
     python train_model.py training_data model
 
@@ -22,6 +42,12 @@ where
 
 - `training_data` (input; required) is a folder with the training data files and
 - `model` (output; required) is a folder for saving your model.
+
+For example:
+
+    python train_model.py a_data/04_model_input/train_42/ b_models/rf_default/
+
+### 4. Predict
 
 You can run you trained model by running
 
@@ -33,13 +59,24 @@ where
 - `test_data` (input; required) is a folder with the validation or test data files (you can use the training data for debugging and cross-validation), and
 - `test_outputs` is a folder for saving your model outputs.
 
-The [Challenge website](https://physionetchallenges.org/2023/#data) provides a training database with a description of the contents and structure of the data files.
+For example:
+
+    python run_model.py b_models/rf_default/ a_data/04_model_input/test_42/ a_data/06_model_output/rf_default_test_42/
+
+### 5. Evaluate
 
 You can evaluate your model by pulling or downloading the [evaluation code](https://github.com/physionetchallenges/evaluation-2023) and running
 
     python evaluate_model.py labels outputs scores.csv
 
-where `labels` is a folder with labels for the data, such as the training database on the PhysioNet webpage; `outputs` is a folder containing files with your model's outputs for the data; and `scores.csv` (optional) is a collection of scores for your model.
+where `labels` is a folder with labels for the data, such as the training database on the PhysioNet webpage; 
+`outputs` is a folder containing files with your model's outputs for the data; 
+and `scores.csv` (optional) is a collection of scores for your model.
+
+For example:
+
+    python evaluate_model.py a_data/04_model_input/test_42/ a_data/06_model_output/rf_default_test_42/ c_reportings/scores_rf_default_test_42.csv
+
 
 ## Which scripts I can edit?
 

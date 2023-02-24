@@ -73,8 +73,9 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
     # Define parameters for random forest classifier and regressor.
     n_estimators   = 123  # Number of trees in the forest.
-    max_leaf_nodes = 456  # Maximum number of leaf nodes in each tree.
-    random_state   = 789  # Random state; set for reproducibility.
+    max_leaf_nodes = None  # Maximum number of leaf nodes in each tree.
+    max_depth = 8
+    random_state   = 42  # Random state; set for reproducibility.
 
     # Impute any missing features; use the mean value by default.
     imputer = SimpleImputer().fit(features)
@@ -82,9 +83,9 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # Train the models.
     features = imputer.transform(features)
     outcome_model = RandomForestClassifier(
-        n_estimators=n_estimators, max_leaf_nodes=max_leaf_nodes, random_state=random_state).fit(features, outcomes.ravel())
+        n_estimators=n_estimators, max_leaf_nodes=max_leaf_nodes, max_depth=max_depth, random_state=random_state).fit(features, outcomes.ravel())
     cpc_model = RandomForestRegressor(
-        n_estimators=n_estimators, max_leaf_nodes=max_leaf_nodes, random_state=random_state).fit(features, cpcs.ravel())
+        n_estimators=n_estimators, max_leaf_nodes=max_leaf_nodes, max_depth=max_depth, random_state=random_state).fit(features, cpcs.ravel())
 
     # Save the models.
     save_challenge_model(model_folder, imputer, outcome_model, cpc_model)
@@ -174,6 +175,7 @@ def get_features(patient_metadata, recording_metadata, recording_data, return_as
 
     # Compute mean and standard deviation for each channel over all recordings
     available_signal_data = list()
+    hours = list()
     for i in range(num_recordings):
         signal_data, sampling_frequency, signal_channels = recording_data[i]
         if signal_data is not None:
@@ -182,6 +184,7 @@ def get_features(patient_metadata, recording_metadata, recording_data, return_as
             if (quality >= min_quality) and (hour <= max_hours):
                 signal_data = reorder_recording_channels(signal_data, signal_channels, channels) # Reorder the channels in the signal data, as needed, for consistency across different recordings.
                 available_signal_data.append(signal_data)
+                hours.append(hour)
 
     if len(available_signal_data) > 0:
         available_signal_data = np.hstack(available_signal_data)
@@ -232,6 +235,8 @@ def get_features(patient_metadata, recording_metadata, recording_data, return_as
     features = np.hstack((patient_features, recording_features))
     features_dict = patient_features_dict
     features_dict.update(recording_features_dict)
+    #features_dict.update({"max_hours": np.max(hours)})
+    #features = np.hstack((features, np.max(hours)))
 
     if return_as_dict:
         return features_dict
