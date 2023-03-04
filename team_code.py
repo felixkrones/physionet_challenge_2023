@@ -236,7 +236,8 @@ def torch_predictions_for_patient(output_list, patient_id_list, hour_list, quali
 
 
 def get_tv_model(model_name="densenet121", num_classes=1, batch_size=64):
-    model = Model(
+    model = torchvisionModel(
+            model_name=model_name,
             num_classes=num_classes,
             print_freq=100,
             batch_size=batch_size,
@@ -420,19 +421,19 @@ class EEGDataset(Dataset):
         signal_data = reorder_recording_channels(signal_data, signal_channels, self.channels) # Reorder the channels in the signal data, as needed, for consistency across different recordings.
         signal_data_t = torch.from_numpy(signal_data)
         signal_data_t = nn.functional.normalize(signal_data_t) #TODO: Check if this is the right way to normalize the signal data.
+        signal_data_t = signal_data_t.view(18, 200, 150)
         id = self.patient_ids[idx]
         label = self.labels[idx]
         hour = self.hours[idx]
         quality = self.qualities[idx]
 
-        print(signal_data_t.shape)
-
         return {"image": signal_data_t, "label": label, "id": id, "hour": hour, "quality": quality}
 
 
-class Model(pl.LightningModule):
+class torchvisionModel(pl.LightningModule):
     def __init__(
         self,
+        model_name,
         num_classes,
         classification="multilabel",
         print_freq=100,
@@ -441,13 +442,40 @@ class Model(pl.LightningModule):
         super().__init__()
         self._b_size = batch_size
         self._print_freq = print_freq
+        self.model_name = model_name
         self.num_classes = num_classes
         self.classification = classification
-        #TODO: Add the model architecture here.
-        self.model = nn.Sequential(
-            nn.Conv1D()
-        )
+        self.model = eval(f"models.{model_name}(weights='DEFAULT')")
+        self.model.features[0] = nn.Conv2d(18, 64, kernel_size=7, stride=2, padding=3, bias=False)
 
+        # freeze_model(self.model)
+        if "resnet" in model_name.lower():
+            num_features = self.model.fc.in_features
+            self.model.fc = nn.Linear(num_features, self.num_classes)
+        elif "densenet" in model_name.lower():
+            num_features = self.model.classifier.in_features
+            self.model.classifier = nn.Linear(num_features, self.num_classes)
+        elif "vit_b_16" in model_name.lower():
+            num_features = self.model.heads.head.in_features
+            self.model.heads.head = nn.Linear(num_features, self.num_classes)
+        else:
+            raise NotImplementedError(f"Model {model_name} not implemented")
+
+    def remove_head(self):
+        if "resnet" in self.model_name.lower():
+            num_features = self.model.fc.in_features
+            id_layer = nn.Identity(num_features)
+            self.model.fc = id_layer
+        elif "densenet" in self.model_name.lower():
+            num_features = self.model.classifier.in_features
+            id_layer = nn.Identity(num_features)
+            self.model.classifier = id_layer
+        elif "vit" in self.model_name.lower():
+            num_features = self.model.heads.head.in_features
+            id_layer = nn.Identity(num_features)
+            self.model.heads.head = id_layer
+        else:
+            raise NotImplementedError(f"Model {self.model_name} not implemented")
 
     def forward(self, x, classify=True):
         return self.model.forward(x)
@@ -466,6 +494,7 @@ class Model(pl.LightningModule):
     def process_batch(self, batch):
         img, lab = self.unpack_batch(batch)
         out = self.forward(img)
+        out = out.squeeze()
         if self.classification == "multilabel":
             prob = torch.sigmoid(out)
             loss = F.binary_cross_entropy(prob, lab)

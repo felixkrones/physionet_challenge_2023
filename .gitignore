@@ -3,6 +3,7 @@
 ###############################################################################
 
 # exclude everything
+lightning_logs/*
 a_data/*
 b_models/*
 c_evaluation_results/*
