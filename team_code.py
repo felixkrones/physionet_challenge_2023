@@ -9,12 +9,27 @@
 #
 ################################################################################
 
+import os
 from helper_code import *
+import pandas as pd
 import numpy as np, os, sys
 import mne
 from sklearn.impute import SimpleImputer
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 import joblib
+import timm
+import torch
+from torch import nn
+import torchvision
+from torchvision import transforms, models
+from torchvision.io import read_image
+from torch.utils.data import Dataset, DataLoader
+import torch.nn.functional as F
+import pytorch_lightning as pl
+from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.callbacks import ModelCheckpoint
+from tqdm import tqdm
+
 
 ################################################################################
 #
@@ -24,12 +39,24 @@ import joblib
 
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose):
+    batch_size = 64
+    val_size = 0.2
+    max_hours = 72
+    min_quality = 0.0
+    max_epochs = 20
+
     # Find data files.
     if verbose >= 1:
         print('Finding the Challenge data...')
 
     patient_ids = find_data_folders(data_folder)
     num_patients = len(patient_ids)
+
+    #TODO: Implement split into train and validation set
+    num_val = int(num_patients * val_size)
+    num_train = num_patients - num_val
+    train_ids = patient_ids[:num_train]
+    val_ids = patient_ids[num_train:]
 
     if num_patients==0:
         raise FileNotFoundError('No data was provided.')
@@ -40,6 +67,30 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # Extract the features and labels.
     if verbose >= 1:
         print('Extracting features and labels from the Challenge data...')
+
+    # Get DL data
+    train_dataset = EEGDataset(data_folder, patient_ids = train_ids)
+    val_dataset = EEGDataset(data_folder, patient_ids = val_ids)
+    torch_dataset = EEGDataset(data_folder, patient_ids = patient_ids)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=4, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=4, shuffle=False)
+    data_loader = DataLoader(torch_dataset, batch_size=batch_size, num_workers=4, shuffle=False)
+
+    # Train torch model
+    print("Start training torch model...")
+    torch_model = get_tv_model(batch_size=batch_size)
+    trainer = pl.Trainer(
+        accelerator="gpu" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu",
+        callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", every_n_epochs=1, save_last=True, save_top_k=5)],
+        log_every_n_steps=1,
+        max_epochs=max_epochs,
+        gpus=1,
+        enable_progress_bar=True,
+    )
+    trainer.fit(torch_model, train_loader, val_loader)
+    print("Finished training torch model. Now calculating predictions...")
+    output_list, patient_id_list, hour_list, quality_list = torch_prediction(torch_model, data_loader, device)
+    
 
     features = list()
     outcomes = list()
@@ -52,9 +103,11 @@ def train_challenge_model(data_folder, model_folder, verbose):
         # Load data.
         patient_id = patient_ids[i]
         patient_metadata, recording_metadata, recording_data = load_challenge_data(data_folder, patient_id)
+        agg_outcome_probability_torch, outcome_probabilities_torch = torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id, max_hours=max_hours, min_quality=min_quality)
 
         # Extract features.
-        current_features = get_features(patient_metadata, recording_metadata, recording_data)
+        current_features = get_features(patient_metadata, recording_metadata, recording_data, max_hours=max_hours, min_quality=min_quality)
+        current_features = np.hstack((current_features, outcome_probabilities_torch)) #TODO: Optional: Add torch model predictions
         features.append(current_features)
 
         # Extract labels.
@@ -67,28 +120,32 @@ def train_challenge_model(data_folder, model_folder, verbose):
     outcomes = np.vstack(outcomes)
     cpcs = np.vstack(cpcs)
 
+    # Get device
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+
     # Train the models.
     if verbose >= 1:
         print('Training the Challenge models on the Challenge data...')
 
     # Define parameters for random forest classifier and regressor.
-    n_estimators   = 123  # Number of trees in the forest.
+    n_estimators = 123  # Number of trees in the forest.
     max_leaf_nodes = None  # Maximum number of leaf nodes in each tree.
     max_depth = 8
-    random_state   = 42  # Random state; set for reproducibility.
+    random_state = 42  # Random state; set for reproducibility.
 
     # Impute any missing features; use the mean value by default.
     imputer = SimpleImputer().fit(features)
+    features = imputer.transform(features)
 
     # Train the models.
-    features = imputer.transform(features)
+    print("Start training rf models...")
     outcome_model = RandomForestClassifier(
         n_estimators=n_estimators, max_leaf_nodes=max_leaf_nodes, max_depth=max_depth, random_state=random_state).fit(features, outcomes.ravel())
     cpc_model = RandomForestRegressor(
         n_estimators=n_estimators, max_leaf_nodes=max_leaf_nodes, max_depth=max_depth, random_state=random_state).fit(features, cpcs.ravel())
 
     # Save the models.
-    save_challenge_model(model_folder, imputer, outcome_model, cpc_model)
+    save_challenge_model(model_folder, imputer, outcome_model, cpc_model, torch_model)
 
     if verbose >= 1:
         print('Done.')
@@ -97,7 +154,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
 # arguments of this function.
 def load_challenge_models(model_folder, verbose):
     filename = os.path.join(model_folder, 'models.sav')
-    return joblib.load(filename)
+    model = joblib.load(filename)
+    file_path = os.path.join(model_folder, 'checkpoint.pth')
+    model["torch_model"] = load_last_pt_ckpt(file_path)
+    return model
 
 # Run your trained models. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function.
@@ -105,12 +165,23 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
     imputer = models['imputer']
     outcome_model = models['outcome_model']
     cpc_model = models['cpc_model']
+    torch_model = models['torch_model']
+
+    # Get device
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 
     # Load data.
     patient_metadata, recording_metadata, recording_data = load_challenge_data(data_folder, patient_id)
 
+    # Torch prediction
+    data_set = EEGDataset(data_folder, patient_ids = [patient_id])
+    data_loader = DataLoader(data_set, batch_size=1, num_workers=4, shuffle=False)
+    output_list, patient_id_list, hour_list, quality_list = torch_prediction(torch_model, data_loader, device)
+    agg_outcome_probability_torch, outcome_probabilities_torch = torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id) #TODO: Think about whether to use max_hours and min_quality.
+
     # Extract features.
-    features = get_features(patient_metadata, recording_metadata, recording_data)
+    features = get_features(patient_metadata, recording_metadata, recording_data) #TODO: Think about whether to use max_hours and min_quality.
+    features = np.hstack((features, outcome_probabilities_torch)) #TODO: Optional: Use the torch model to predict the outcome probability.
     features = features.reshape(1, -1)
 
     # Impute missing data.
@@ -119,6 +190,7 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
     # Apply models to features.
     outcome = outcome_model.predict(features)[0]
     outcome_probability = outcome_model.predict_proba(features)[0, 1]
+    #outcome_probability = agg_outcome_probability_torch #TODO: Optional: Use the torch model to predict the outcome probability.
     cpc = cpc_model.predict(features)[0]
 
     # Ensure that the CPC score is between (or equal to) 1 and 5.
@@ -131,12 +203,71 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
 # Optional functions. You can change or remove these functions and/or add new functions.
 #
 ################################################################################
+def torch_prediction(model, data_loader, device):
+    model.eval()
+    with torch.no_grad():
+        output_list = []
+        patient_id_list = []
+        hour_list = []
+        quality_list = []
+        for _, batch in enumerate(data_loader):
+            data, targets, ids, hours, qualities = batch["image"], batch["label"], batch["id"], batch["hour"], batch["quality"]
+            data = data.to(device)
+            outputs = model(data) #TODO: Check whether to convert using softmax
+            output_list.append(outputs.cpu().numpy())
+            patient_id_list.append(ids.numpy())
+            hour_list.append(hours.numpy())
+            quality_list.append(qualities.numpy())
+    return output_list, patient_id_list, hour_list, quality_list
+
+
+def torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id, max_hour=72, min_quality=0):
+    # Get the predictions for the patient
+    outcome_probabilities_torch = output_list[patient_id_list == patient_id]
+    hours_patients = hour_list[patient_id_list == patient_id]
+
+    #  Get values for the first 72 hours
+    outcome_probabilities_torch = [outcome_probabilities_torch[hours_patients == hour] if hour in hours_patients else np.nan for hour in range(max_hour)]
+    
+    # Aggregate the probabilities
+    agg_outcome_probability_torch = np.nanmax(outcome_probabilities_torch) #TODO: Choose a good aggregation method, maybe max?
+
+    return agg_outcome_probability_torch, outcome_probabilities_torch
+
+
+def get_tv_model(model_name="densenet121", num_classes=1, batch_size=64):
+    model = Model(
+            num_classes=num_classes,
+            print_freq=100,
+            batch_size=batch_size,
+        )
+    return model
+
+
+# Load last checkpoint
+def load_last_pt_ckpt(ckpt_path):
+    model = get_tv_model()
+    if os.path.isfile(ckpt_path):
+        checkpoint = torch.load(ckpt_path)
+        state_dic = checkpoint["model"]
+        epoch = int(checkpoint["epoch"])
+        model.load_state_dict(state_dic)
+        print(
+            f"Loading checkpoint from {ckpt_path} with epoch {epoch}"
+        )
+        return model, epoch
+    else:
+        raise FileNotFoundError(f"No checkpoint found at {ckpt_path}")
+
 
 # Save your trained model.
-def save_challenge_model(model_folder, imputer, outcome_model, cpc_model):
+def save_challenge_model(model_folder, imputer, outcome_model, cpc_model, torch_model=None):
     d = {'imputer': imputer, 'outcome_model': outcome_model, 'cpc_model': cpc_model}
     filename = os.path.join(model_folder, 'models.sav')
     joblib.dump(d, filename, protocol=0)
+    if torch_model is not None:
+        file_path = os.path.join(model_folder, 'checkpoint.pth')
+        torch.save(torch_model.state_dict(), file_path)
 
 # Extract features from the data.
 def get_features(patient_metadata, recording_metadata, recording_data, return_as_dict=False, max_hours=73, min_quality=0.0):
@@ -242,3 +373,188 @@ def get_features(patient_metadata, recording_metadata, recording_data, return_as
         return features_dict
     else:
         return features
+
+
+class EEGDataset(Dataset):
+    def __init__(
+        self, data_folder, patient_ids
+    ):
+        self.channels = ['Fp1-F7', 'F7-T3', 'T3-T5', 'T5-O1', 'Fp2-F8', 'F8-T4', 'T4-T6', 'T6-O2', 'Fp1-F3',
+            'F3-C3', 'C3-P3', 'P3-O1', 'Fp2-F4', 'F4-C4', 'C4-P4', 'P4-O2', 'Fz-Cz', 'Cz-Pz']
+
+        recording_locations_list = list()
+        patient_ids_list = list()
+        labels_list = list()
+        hours_list = list()
+        qualities_list = list()
+        for patient_id in patient_ids:
+            patient_metadata_file = os.path.join(data_folder, patient_id, patient_id + '.txt')
+            recording_metadata_file = os.path.join(data_folder, patient_id, patient_id + '.tsv')
+            patient_metadata = load_text_file(patient_metadata_file)
+            recording_metadata = load_text_file(recording_metadata_file)
+            recording_ids = get_column(recording_metadata, 'Record', str)
+            hours = get_column(recording_metadata, 'Hour', str)
+            qualities = get_column(recording_metadata, 'Quality', str)
+            current_outcome = get_outcome(patient_metadata)
+            for recording_id, hour, quality in zip(recording_ids, hours, qualities):
+                if recording_id != 'nan':
+                    recording_location = os.path.join(data_folder, patient_id, recording_id)
+                    recording_locations_list.append(recording_location)
+                    patient_ids_list.append(patient_id)
+                    labels_list.append(current_outcome)
+                    hours_list.append(hour)
+                    qualities_list.append(quality)
+    
+        self.recording_locations = recording_locations_list
+        self.patient_ids = patient_ids_list
+        self.labels = labels_list
+        self.hours = hours_list
+        self.qualities = qualities_list
+    
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+        signal_data, sampling_frequency, signal_channels = load_recording(self.recording_locations[idx])
+        signal_data = reorder_recording_channels(signal_data, signal_channels, self.channels) # Reorder the channels in the signal data, as needed, for consistency across different recordings.
+        signal_data_t = torch.from_numpy(signal_data)
+        signal_data_t = nn.functional.normalize(signal_data_t) #TODO: Check if this is the right way to normalize the signal data.
+        id = self.patient_ids[idx]
+        label = self.labels[idx]
+        hour = self.hours[idx]
+        quality = self.qualities[idx]
+
+        print(signal_data_t.shape)
+
+        return {"image": signal_data_t, "label": label, "id": id, "hour": hour, "quality": quality}
+
+
+class Model(pl.LightningModule):
+    def __init__(
+        self,
+        num_classes,
+        classification="multilabel",
+        print_freq=100,
+        batch_size=10,
+    ):
+        super().__init__()
+        self._b_size = batch_size
+        self._print_freq = print_freq
+        self.num_classes = num_classes
+        self.classification = classification
+        #TODO: Add the model architecture here.
+        self.model = nn.Sequential(
+            nn.Conv1D()
+        )
+
+
+    def forward(self, x, classify=True):
+        return self.model.forward(x)
+
+    def configure_optimizers(self):
+        params_to_update = []
+        for param in self.parameters():
+            if param.requires_grad == True:
+                params_to_update.append(param)
+        optimizer = torch.optim.Adam(params_to_update, lr=0.001)
+        return optimizer
+
+    def unpack_batch(self, batch):
+        return batch["image"], batch["label"]
+
+    def process_batch(self, batch):
+        img, lab = self.unpack_batch(batch)
+        out = self.forward(img)
+        if self.classification == "multilabel":
+            prob = torch.sigmoid(out)
+            loss = F.binary_cross_entropy(prob, lab)
+        elif self.classification == "multiclass":
+            prob = F.softmax(out, dim=1)
+            loss = F.cross_entropy(out, lab)
+        else:
+            raise NotImplementedError(
+                f"Classification {self.classification} not implemented"
+            )
+        return loss
+
+    def training_step(self, batch, batch_idx):
+        loss = self.process_batch(batch)
+        if (batch_idx % self._print_freq == 0) or (
+            batch_idx == (int(self._d_size / self._b_size) - 2)
+        ):
+            print(f"batch {batch_idx} train_loss: {loss}")
+        self.log("train_loss", loss)
+        grid = torchvision.utils.make_grid(
+            batch["image"][0:4, ...], nrow=2, normalize=True
+        )
+        self.logger.experiment.add_image("images", grid, self.global_step)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        loss = self.process_batch(batch)
+        if (batch_idx % self._print_freq == 0) or (
+            batch_idx == (int(self._d_size / self._b_size) - 2)
+        ):
+            print(f"batch {batch_idx} val_loss: {loss}")
+        self.log("val_loss", loss)
+
+    def test_step(self, batch, batch_idx):
+        loss = self.process_batch(batch)
+        self.log("test_loss", loss)
+
+
+@torch.no_grad()
+def predict(data_loader, model, device) -> np.ndarray:
+    # switch to evaluation mode
+    model = model.to(device)
+    model.eval()
+
+    p_out = torch.FloatTensor().to(device)
+    t_out = torch.FloatTensor().to(device)
+
+    target_labels = np.empty(0)
+    for iteration in tqdm(iter(data_loader)):
+        # Get prediction
+        output, target = predict_from_batches(iteration, model, device)
+        p_out = torch.cat((p_out, output), 0)
+        t_out = torch.cat((t_out, target), 0)
+
+    # Get most likely class
+    if model.multilabel:
+        sigmoid = nn.Sigmoid()
+        preds = sigmoid(p_out)
+        preds_probs = preds.cpu().numpy()
+        preds_labels = preds.gt(0.5).type(preds.dtype)
+    else:
+        softmax = nn.Softmax(dim=1)
+        preds_probs = softmax(p_out).cpu().numpy()
+        _, preds_labels = torch.max(p_out, 1)
+    preds_labels = preds_labels.cpu().numpy()
+    target_labels = t_out.cpu().numpy()
+
+    print(
+        f"Predicted {len(preds_probs)} observations with {len(preds_probs[0])} {'multilabel' if model.multilabel else 'multiclass'} labels"
+    )
+
+    return preds_probs, preds_labels, target_labels, p_out, preds
+
+
+def predict_from_batches(iteration, model, device):
+    # Extract data
+    if type(iteration) == list:
+        images = iteration[0]
+        target = iteration[1]
+    elif type(iteration) == dict:
+        images = iteration["image"]
+        target = iteration["label"]
+    else:
+        raise ValueError("Something is wrong. __getitem__ must return list or dict")
+    images = images.to(device, non_blocking=True)
+    target = target.to(device, non_blocking=True)
+
+    # Get predictions
+    with torch.no_grad():
+        output = model(images, classify=True)
+
+    return output, target
