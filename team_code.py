@@ -11,6 +11,7 @@
 
 import os
 from helper_code import *
+import librosa
 import pandas as pd
 import numpy as np, os, sys
 import mne
@@ -21,8 +22,7 @@ import timm
 import torch
 from torch import nn
 import torchvision
-from torchvision import transforms, models
-from torchvision.io import read_image
+import torchvision.models as models
 from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
 import pytorch_lightning as pl
@@ -43,7 +43,12 @@ def train_challenge_model(data_folder, model_folder, verbose):
     val_size = 0.2
     max_hours = 72
     min_quality = 0.0
-    max_epochs = 20
+    max_epochs = 2
+
+    # Get device
+    device = "cpu" #torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    accelerator = "cpu" # "gpu" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    print(f"Using device {device}")
 
     # Find data files.
     if verbose >= 1:
@@ -69,26 +74,34 @@ def train_challenge_model(data_folder, model_folder, verbose):
         print('Extracting features and labels from the Challenge data...')
 
     # Get DL data
-    train_dataset = EEGDataset(data_folder, patient_ids = train_ids)
-    val_dataset = EEGDataset(data_folder, patient_ids = val_ids)
-    torch_dataset = EEGDataset(data_folder, patient_ids = patient_ids)
+    train_dataset = EEGDataset(data_folder, patient_ids = train_ids, device=device)
+    val_dataset = EEGDataset(data_folder, patient_ids = val_ids, device=device)
+    torch_dataset = EEGDataset(data_folder, patient_ids = patient_ids, device=device)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=4, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=4, shuffle=False)
     data_loader = DataLoader(torch_dataset, batch_size=batch_size, num_workers=4, shuffle=False)
 
+    # Find last checkpoint
+    resume_from_checkpoint = get_last_chkpt(model_folder)
+
     # Train torch model
-    print("Start training torch model...")
-    torch_model = get_tv_model(batch_size=batch_size)
+    #checkpoint_callback.CHECKPOINT_NAME_LAST = "{epoch}-last" #TODO: Check if this is necessary
+    torch_model = get_tv_model(batch_size=batch_size, d_size=len(train_loader)).to(device)
     trainer = pl.Trainer(
-        accelerator="gpu" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu",
-        callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", every_n_epochs=1, save_last=True, save_top_k=5)],
+        accelerator=accelerator,
+        callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", every_n_epochs=1, save_last=True, save_top_k=1)],
         log_every_n_steps=1,
         max_epochs=max_epochs,
         gpus=1,
         enable_progress_bar=True,
+        logger=TensorBoardLogger(model_folder, name=''),
+        resume_from_checkpoint=resume_from_checkpoint,
     )
+    trainer.logger._default_hp_metric = False
+    print("Start training torch model...")
     trainer.fit(torch_model, train_loader, val_loader)
     print("Finished training torch model. Now calculating predictions...")
+    
     output_list, patient_id_list, hour_list, quality_list = torch_prediction(torch_model, data_loader, device)
     
 
@@ -119,9 +132,6 @@ def train_challenge_model(data_folder, model_folder, verbose):
     features = np.vstack(features)
     outcomes = np.vstack(outcomes)
     cpcs = np.vstack(cpcs)
-
-    # Get device
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 
     # Train the models.
     if verbose >= 1:
@@ -156,6 +166,7 @@ def load_challenge_models(model_folder, verbose):
     filename = os.path.join(model_folder, 'models.sav')
     model = joblib.load(filename)
     file_path = os.path.join(model_folder, 'checkpoint.pth')
+    #file_path = os.path.join(model_folder, 'last.ckpt')
     model["torch_model"] = load_last_pt_ckpt(file_path)
     return model
 
@@ -168,13 +179,13 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
     torch_model = models['torch_model']
 
     # Get device
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    device = "cpu" #torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 
     # Load data.
     patient_metadata, recording_metadata, recording_data = load_challenge_data(data_folder, patient_id)
 
     # Torch prediction
-    data_set = EEGDataset(data_folder, patient_ids = [patient_id])
+    data_set = EEGDataset(data_folder, patient_ids = [patient_id], device = device)
     data_loader = DataLoader(data_set, batch_size=1, num_workers=4, shuffle=False)
     output_list, patient_id_list, hour_list, quality_list = torch_prediction(torch_model, data_loader, device)
     agg_outcome_probability_torch, outcome_probabilities_torch = torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id) #TODO: Think about whether to use max_hours and min_quality.
@@ -203,6 +214,29 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
 # Optional functions. You can change or remove these functions and/or add new functions.
 #
 ################################################################################
+def get_last_chkpt(model_folder):
+    if os.path.exists(model_folder):
+        # Find last version folder
+        last_version = 0
+        for folder in os.listdir(model_folder):
+            if "version_" in folder:
+                last_version = max(last_version, int(folder.split("_")[-1]))
+        last_version = f"version_{last_version}"
+        if os.path.isfile(f"{model_folder}/{last_version}/checkpoints/last.ckpt"):
+            resume_from_checkpoint = f"{model_folder}/{last_version}/checkpoints/last.ckpt"
+        else:
+            resume_from_checkpoint = None
+    else:
+        resume_from_checkpoint = None
+
+    if resume_from_checkpoint is not None:
+        print("Resuming from checkpoint: ", resume_from_checkpoint)
+    else:
+        print("No checkpoint found. Starting from scratch.")
+    
+    return resume_from_checkpoint
+
+
 def torch_prediction(model, data_loader, device):
     model.eval()
     with torch.no_grad():
@@ -210,37 +244,45 @@ def torch_prediction(model, data_loader, device):
         patient_id_list = []
         hour_list = []
         quality_list = []
-        for _, batch in enumerate(data_loader):
+        for _, batch in enumerate(tqdm(data_loader)):
             data, targets, ids, hours, qualities = batch["image"], batch["label"], batch["id"], batch["hour"], batch["quality"]
             data = data.to(device)
             outputs = model(data) #TODO: Check whether to convert using softmax
-            output_list.append(outputs.cpu().numpy())
-            patient_id_list.append(ids.numpy())
-            hour_list.append(hours.numpy())
-            quality_list.append(qualities.numpy())
+            output_list = output_list + outputs.cpu().numpy().tolist()
+            patient_id_list = patient_id_list + ids
+            hour_list = hour_list + hours
+            quality_list = quality_list + qualities
     return output_list, patient_id_list, hour_list, quality_list
 
 
-def torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id, max_hour=72, min_quality=0):
+def torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id, max_hours=72, min_quality=0):
     # Get the predictions for the patient
-    outcome_probabilities_torch = output_list[patient_id_list == patient_id]
-    hours_patients = hour_list[patient_id_list == patient_id]
+    patient_mask = np.array([True if p == patient_id else False for p in patient_id_list])
+    outcome_probabilities_torch = np.array(output_list)[patient_mask]
+    hours_patients = np.array(hour_list)[patient_mask].astype(int).tolist()
+
+    if len(outcome_probabilities_torch[0]) == 1:
+        outcome_probabilities_torch = [i[0] for i in outcome_probabilities_torch]
+    else:
+        raise ValueError("The torch model should only predict one value per patient.")
 
     #  Get values for the first 72 hours
-    outcome_probabilities_torch = [outcome_probabilities_torch[hours_patients == hour] if hour in hours_patients else np.nan for hour in range(max_hour)]
-    
+    # TODO: Think about if and how to fill missing hours or if to leave out
+    outcome_probabilities_torch = [outcome_probabilities_torch[hours_patients.index(hour)] if hour in hours_patients else np.nan for hour in range(max_hours)]
+
     # Aggregate the probabilities
     agg_outcome_probability_torch = np.nanmax(outcome_probabilities_torch) #TODO: Choose a good aggregation method, maybe max?
 
     return agg_outcome_probability_torch, outcome_probabilities_torch
 
 
-def get_tv_model(model_name="densenet121", num_classes=1, batch_size=64):
+def get_tv_model(model_name="densenet121", num_classes=1, batch_size=64, d_size=500):
     model = torchvisionModel(
             model_name=model_name,
             num_classes=num_classes,
-            print_freq=100,
+            print_freq=250,
             batch_size=batch_size,
+            d_size=d_size,
         )
     return model
 
@@ -249,14 +291,16 @@ def get_tv_model(model_name="densenet121", num_classes=1, batch_size=64):
 def load_last_pt_ckpt(ckpt_path):
     model = get_tv_model()
     if os.path.isfile(ckpt_path):
-        checkpoint = torch.load(ckpt_path)
-        state_dic = checkpoint["model"]
-        epoch = int(checkpoint["epoch"])
-        model.load_state_dict(state_dic)
         print(
-            f"Loading checkpoint from {ckpt_path} with epoch {epoch}"
+            f"Loading checkpoint from {ckpt_path}"
         )
-        return model, epoch
+        if "pth" in ckpt_path:
+            checkpoint = torch.load(ckpt_path)
+            state_dic = checkpoint["model"]
+            model.load_state_dict(state_dic)
+        elif "ckpt" in ckpt_path:
+            model = model.load_from_checkpoint(ckpt_path)
+        return model
     else:
         raise FileNotFoundError(f"No checkpoint found at {ckpt_path}")
 
@@ -268,7 +312,7 @@ def save_challenge_model(model_folder, imputer, outcome_model, cpc_model, torch_
     joblib.dump(d, filename, protocol=0)
     if torch_model is not None:
         file_path = os.path.join(model_folder, 'checkpoint.pth')
-        torch.save(torch_model.state_dict(), file_path)
+        torch.save({"model": torch_model.state_dict()}, file_path)
 
 # Extract features from the data.
 def get_features(patient_metadata, recording_metadata, recording_data, return_as_dict=False, max_hours=73, min_quality=0.0):
@@ -378,7 +422,7 @@ def get_features(patient_metadata, recording_metadata, recording_data, return_as
 
 class EEGDataset(Dataset):
     def __init__(
-        self, data_folder, patient_ids
+        self, data_folder, patient_ids, device
     ):
         self.channels = ['Fp1-F7', 'F7-T3', 'T3-T5', 'T5-O1', 'Fp2-F8', 'F8-T4', 'T4-T6', 'T6-O2', 'Fp1-F3',
             'F3-C3', 'C3-P3', 'P3-O1', 'Fp2-F4', 'F4-C4', 'C4-P4', 'P4-O2', 'Fz-Cz', 'Cz-Pz']
@@ -411,6 +455,8 @@ class EEGDataset(Dataset):
         self.labels = labels_list
         self.hours = hours_list
         self.qualities = qualities_list
+        self.device = device
+        self._precision = torch.float32
     
 
     def __len__(self):
@@ -419,15 +465,18 @@ class EEGDataset(Dataset):
     def __getitem__(self, idx):
         signal_data, sampling_frequency, signal_channels = load_recording(self.recording_locations[idx])
         signal_data = reorder_recording_channels(signal_data, signal_channels, self.channels) # Reorder the channels in the signal data, as needed, for consistency across different recordings.
-        signal_data_t = torch.from_numpy(signal_data)
-        signal_data_t = nn.functional.normalize(signal_data_t) #TODO: Check if this is the right way to normalize the signal data.
-        signal_data_t = signal_data_t.view(18, 200, 150)
+        signal_data = librosa.feature.melspectrogram(y=signal_data, sr=100, n_mels=224)
+        signal_data = torch.from_numpy(signal_data)
+        signal_data = nn.functional.normalize(signal_data).to(self._precision) #TODO: Check if this is the right way to normalize the signal data.
         id = self.patient_ids[idx]
         label = self.labels[idx]
         hour = self.hours[idx]
         quality = self.qualities[idx]
 
-        return {"image": signal_data_t, "label": label, "id": id, "hour": hour, "quality": quality}
+        signal_data = signal_data.to(self.device)
+        label = torch.from_numpy(np.array(label)).to(self._precision).to(self.device)
+
+        return {"image": signal_data, "label": label, "id": id, "hour": hour, "quality": quality}
 
 
 class torchvisionModel(pl.LightningModule):
@@ -438,8 +487,10 @@ class torchvisionModel(pl.LightningModule):
         classification="multilabel",
         print_freq=100,
         batch_size=10,
+        d_size=500,
     ):
         super().__init__()
+        self._d_size = d_size
         self._b_size = batch_size
         self._print_freq = print_freq
         self.model_name = model_name
@@ -517,7 +568,7 @@ class torchvisionModel(pl.LightningModule):
         grid = torchvision.utils.make_grid(
             batch["image"][0:4, ...], nrow=2, normalize=True
         )
-        self.logger.experiment.add_image("images", grid, self.global_step)
+        #self.logger.experiment.add_image("images", grid, self.global_step)
         return loss
 
     def validation_step(self, batch, batch_idx):

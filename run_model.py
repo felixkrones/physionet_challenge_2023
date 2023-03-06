@@ -41,6 +41,7 @@ def run_model(model_folder, data_folder, output_folder, allow_failures, verbose)
 
     # Iterate over the patients.
     for i in range(num_patients):
+        print(f"[{i}/{num_patients}]")
         if verbose >= 2:
             print('    {}/{}...'.format(i+1, num_patients))
 
