@@ -10,6 +10,7 @@ c_evaluation_results/*
 x_original_files/*
 Pipfile.lock
 Pipfile
+*.csv
 
 # exception to the rule
 !*/.gitkeep

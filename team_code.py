@@ -121,6 +121,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         # Extract features.
         current_features = get_features(patient_metadata, recording_metadata, recording_data, max_hours=max_hours, min_quality=min_quality)
         current_features = np.hstack((current_features, outcome_probabilities_torch)) #TODO: Optional: Add torch model predictions
+        #current_features = outcome_probabilities_torch
         features.append(current_features)
 
         # Extract labels.
@@ -193,6 +194,7 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
     # Extract features.
     features = get_features(patient_metadata, recording_metadata, recording_data) #TODO: Think about whether to use max_hours and min_quality.
     features = np.hstack((features, outcome_probabilities_torch)) #TODO: Optional: Use the torch model to predict the outcome probability.
+    #features = np.array([outcome_probabilities_torch])
     features = features.reshape(1, -1)
 
     # Impute missing data.
@@ -201,7 +203,8 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
     # Apply models to features.
     outcome = outcome_model.predict(features)[0]
     outcome_probability = outcome_model.predict_proba(features)[0, 1]
-    #outcome_probability = agg_outcome_probability_torch #TODO: Optional: Use the torch model to predict the outcome probability.
+    #outcome_probability = agg_outcome_probability_torch
+    #outcome = 1 if outcome_probability > 0.5 else 0
     cpc = cpc_model.predict(features)[0]
 
     # Ensure that the CPC score is between (or equal to) 1 and 5.
@@ -247,7 +250,8 @@ def torch_prediction(model, data_loader, device):
         for _, batch in enumerate(tqdm(data_loader)):
             data, targets, ids, hours, qualities = batch["image"], batch["label"], batch["id"], batch["hour"], batch["quality"]
             data = data.to(device)
-            outputs = model(data) #TODO: Check whether to convert using softmax
+            outputs = model(data)
+            outputs = torch.sigmoid(outputs) #TODO: Check whether to convert using softmax
             output_list = output_list + outputs.cpu().numpy().tolist()
             patient_id_list = patient_id_list + ids
             hour_list = hour_list + hours
@@ -411,8 +415,8 @@ def get_features(patient_metadata, recording_metadata, recording_data, return_as
     features = np.hstack((patient_features, recording_features))
     features_dict = patient_features_dict
     features_dict.update(recording_features_dict)
-    #features_dict.update({"max_hours": np.max(hours)})
-    #features = np.hstack((features, np.max(hours)))
+    features_dict.update({"max_hours": np.max(hours)})
+    features = np.hstack((features, np.max(hours)))
 
     if return_as_dict:
         return features_dict
