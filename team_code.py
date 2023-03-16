@@ -126,7 +126,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
         # Get torch predictions
         agg_outcome_probability_torch, outcome_probabilities_torch, outcome_flags_torch = torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id, max_hours=max_hours, min_quality=min_quality)
-        current_features = np.hstack((current_features, outcome_probabilities_torch, outcome_flags_torch)) #TODO: Combine new torch features
+        current_features = np.hstack((current_features, outcome_probabilities_torch)) #TODO: Combine new torch features
 
         # Extract labels.
         features.append(current_features)
@@ -209,7 +209,7 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
 
     # Extract features.
     features = get_features(patient_metadata, recording_metadata, recording_data) 
-    features = np.hstack((features, outcome_probabilities_torch, outcome_flags_torch)) #TODO: Combine new torch features
+    features = np.hstack((features, outcome_probabilities_torch)) #TODO: Combine new torch features
     features = features.reshape(1, -1)
 
     # Impute missing data.
