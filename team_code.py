@@ -15,12 +15,14 @@ import librosa
 import pandas as pd
 import numpy as np, os, sys
 import mne
+import random
 from sklearn.impute import SimpleImputer
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 import joblib
 import timm
 import torch
 from torch import nn
+from torch.utils.data.dataloader import default_collate
 import torchvision
 import torchvision.models as models
 from torch.utils.data import Dataset, DataLoader
@@ -57,11 +59,13 @@ def train_challenge_model(data_folder, model_folder, verbose):
     patient_ids = find_data_folders(data_folder)
     num_patients = len(patient_ids)
 
-    #TODO: Implement split into train and validation set
+    # Split into train and validation set
     num_val = int(num_patients * val_size)
     num_train = num_patients - num_val
-    train_ids = patient_ids[:num_train]
-    val_ids = patient_ids[num_train:]
+    patient_ids_aux = patient_ids.copy()
+    #random.shuffle(patient_ids_aux) #TODO: Add back in
+    train_ids = patient_ids_aux[:num_train]
+    val_ids = patient_ids_aux[num_train:]
 
     if num_patients==0:
         raise FileNotFoundError('No data was provided.')
@@ -77,15 +81,14 @@ def train_challenge_model(data_folder, model_folder, verbose):
     train_dataset = EEGDataset(data_folder, patient_ids = train_ids, device=device)
     val_dataset = EEGDataset(data_folder, patient_ids = val_ids, device=device)
     torch_dataset = EEGDataset(data_folder, patient_ids = patient_ids, device=device)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=4, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=4, shuffle=False)
-    data_loader = DataLoader(torch_dataset, batch_size=batch_size, num_workers=4, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=4, shuffle=True, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=4, shuffle=False, pin_memory=True)
+    data_loader = DataLoader(torch_dataset, batch_size=batch_size, num_workers=4, shuffle=False, pin_memory=True)
 
     # Find last checkpoint
     resume_from_checkpoint = get_last_chkpt(model_folder)
 
     # Train torch model
-    #checkpoint_callback.CHECKPOINT_NAME_LAST = "{epoch}-last" #TODO: Check if this is necessary
     torch_model = get_tv_model(batch_size=batch_size, d_size=len(train_loader)).to(device)
     trainer = pl.Trainer(
         accelerator=accelerator,
@@ -101,38 +104,51 @@ def train_challenge_model(data_folder, model_folder, verbose):
     print("Start training torch model...")
     trainer.fit(torch_model, train_loader, val_loader)
     print("Finished training torch model. Now calculating predictions...")
-    
+
     output_list, patient_id_list, hour_list, quality_list = torch_prediction(torch_model, data_loader, device)
     
 
     features = list()
     outcomes = list()
+    patients = list()
     cpcs = list()
-
+    patient_ids_aux = list()
+    outcome_probabilities_torch_aux = list()
+    outcome_flags_torch_aux = list()
     for i in range(num_patients):
         if verbose >= 2:
             print('    {}/{}...'.format(i+1, num_patients))
 
-        # Load data.
+        # Load data and extract features
         patient_id = patient_ids[i]
         patient_metadata, recording_metadata, recording_data = load_challenge_data(data_folder, patient_id)
-        agg_outcome_probability_torch, outcome_probabilities_torch = torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id, max_hours=max_hours, min_quality=min_quality)
-
-        # Extract features.
         current_features = get_features(patient_metadata, recording_metadata, recording_data, max_hours=max_hours, min_quality=min_quality)
-        current_features = np.hstack((current_features, outcome_probabilities_torch)) #TODO: Optional: Add torch model predictions
-        #current_features = outcome_probabilities_torch
-        features.append(current_features)
+
+        # Get torch predictions
+        agg_outcome_probability_torch, outcome_probabilities_torch, outcome_flags_torch = torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id, max_hours=max_hours, min_quality=min_quality)
+        current_features = np.hstack((current_features, outcome_probabilities_torch, outcome_flags_torch)) #TODO: Combine new torch features
 
         # Extract labels.
+        features.append(current_features)
         current_outcome = get_outcome(patient_metadata)
         outcomes.append(current_outcome)
         current_cpc = get_cpc(patient_metadata)
         cpcs.append(current_cpc)
+        patients.append(patient_id)
+        outcome_probabilities_torch_aux.append(outcome_probabilities_torch)
+        outcome_flags_torch_aux.append(outcome_flags_torch)
 
     features = np.vstack(features)
     outcomes = np.vstack(outcomes)
+    patients = np.vstack(patients)
     cpcs = np.vstack(cpcs)
+    outcome_probabilities_torch_aux = np.vstack(outcome_probabilities_torch_aux)
+    outcome_flags_torch_aux = np.vstack(outcome_flags_torch_aux)
+    dict_aux = {f"prob_{i}": v for i, v in zip(range(max_hours), np.transpose(outcome_probabilities_torch_aux))}
+    dict_aux.update({f"flag_{i}": v for i, v in zip(range(max_hours), np.transpose(outcome_flags_torch_aux))})
+    dict_aux.update({"patient_id": [i[0] for i in patients], "outcome": [i[0] for i in outcomes], "cpc": [i[0] for i in cpcs]})
+    df_aux = pd.DataFrame(dict_aux)
+    df_aux.to_csv(os.path.join(model_folder, "torch_predictions.csv"), index=False)
 
     # Train the models.
     if verbose >= 1:
@@ -189,12 +205,11 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
     data_set = EEGDataset(data_folder, patient_ids = [patient_id], device = device)
     data_loader = DataLoader(data_set, batch_size=1, num_workers=4, shuffle=False)
     output_list, patient_id_list, hour_list, quality_list = torch_prediction(torch_model, data_loader, device)
-    agg_outcome_probability_torch, outcome_probabilities_torch = torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id) #TODO: Think about whether to use max_hours and min_quality.
+    agg_outcome_probability_torch, outcome_probabilities_torch, outcome_flags_torch = torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id)
 
     # Extract features.
-    features = get_features(patient_metadata, recording_metadata, recording_data) #TODO: Think about whether to use max_hours and min_quality.
-    features = np.hstack((features, outcome_probabilities_torch)) #TODO: Optional: Use the torch model to predict the outcome probability.
-    #features = np.array([outcome_probabilities_torch])
+    features = get_features(patient_metadata, recording_metadata, recording_data) 
+    features = np.hstack((features, outcome_probabilities_torch, outcome_flags_torch)) #TODO: Combine new torch features
     features = features.reshape(1, -1)
 
     # Impute missing data.
@@ -251,7 +266,7 @@ def torch_prediction(model, data_loader, device):
             data, targets, ids, hours, qualities = batch["image"], batch["label"], batch["id"], batch["hour"], batch["quality"]
             data = data.to(device)
             outputs = model(data)
-            outputs = torch.sigmoid(outputs) #TODO: Check whether to convert using softmax
+            outputs = torch.sigmoid(outputs)
             output_list = output_list + outputs.cpu().numpy().tolist()
             patient_id_list = patient_id_list + ids
             hour_list = hour_list + hours
@@ -271,13 +286,19 @@ def torch_predictions_for_patient(output_list, patient_id_list, hour_list, quali
         raise ValueError("The torch model should only predict one value per patient.")
 
     #  Get values for the first 72 hours
-    # TODO: Think about if and how to fill missing hours or if to leave out
     outcome_probabilities_torch = [outcome_probabilities_torch[hours_patients.index(hour)] if hour in hours_patients else np.nan for hour in range(max_hours)]
+    outcome_probabilities_torch_imputed = pd.Series(outcome_probabilities_torch, dtype=object).fillna(0).tolist()
+    outcome_flags_torch = [1 if hour in hours_patients else 0 for hour in range(max_hours)]
 
     # Aggregate the probabilities
-    agg_outcome_probability_torch = np.nanmax(outcome_probabilities_torch) #TODO: Choose a good aggregation method, maybe max?
-
-    return agg_outcome_probability_torch, outcome_probabilities_torch
+    weights = range(max_hours)
+    agg_outcome_probability_torch = [p * w for p, w in zip(outcome_probabilities_torch, weights) if not np.isnan(p)]
+    weight_sum = sum([w for p, w in zip(outcome_probabilities_torch, weights) if not np.isnan(p)])
+    if weight_sum == 0:
+        agg_outcome_probability_torch = 0
+    else:
+        agg_outcome_probability_torch = sum(agg_outcome_probability_torch) / weight_sum
+    return agg_outcome_probability_torch, outcome_probabilities_torch_imputed, outcome_flags_torch
 
 
 def get_tv_model(model_name="densenet121", num_classes=1, batch_size=64, d_size=500):
@@ -415,8 +436,8 @@ def get_features(patient_metadata, recording_metadata, recording_data, return_as
     features = np.hstack((patient_features, recording_features))
     features_dict = patient_features_dict
     features_dict.update(recording_features_dict)
-    features_dict.update({"max_hours": np.max(hours)})
-    features = np.hstack((features, np.max(hours)))
+    #features_dict.update({"max_hours": np.max(hours)})
+    #features = np.hstack((features, np.max(hours))) #TODO: add this back in
 
     if return_as_dict:
         return features_dict
@@ -461,7 +482,6 @@ class EEGDataset(Dataset):
         self.qualities = qualities_list
         self.device = device
         self._precision = torch.float32
-    
 
     def __len__(self):
         return len(self.labels)
@@ -470,6 +490,7 @@ class EEGDataset(Dataset):
         signal_data, sampling_frequency, signal_channels = load_recording(self.recording_locations[idx])
         signal_data = reorder_recording_channels(signal_data, signal_channels, self.channels) # Reorder the channels in the signal data, as needed, for consistency across different recordings.
         signal_data = librosa.feature.melspectrogram(y=signal_data, sr=100, n_mels=224)
+        #signal_data = librosa.power_to_db(signal_data, ref=np.max)
         signal_data = torch.from_numpy(signal_data)
         signal_data = nn.functional.normalize(signal_data).to(self._precision) #TODO: Check if this is the right way to normalize the signal data.
         id = self.patient_ids[idx]

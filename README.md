@@ -10,6 +10,13 @@ This code uses four main scripts, described below, to train and run a model for 
 
 The [Challenge website](https://physionetchallenges.org/2023/#data) provides a training database with a description of the contents and structure of the data files.
 
+## What we did
+- Log mel spectrograms using librosa package
+- Flags for missing signals and prob of 0 for missing signals to be safe
+- Max hour
+- Aggregated signals as mean with heigher weights towards the end
+
+
 ## How do I run these scripts?
 
 ### 0. Dependencies
@@ -76,7 +83,6 @@ and `scores.csv` (optional) is a collection of scores for your model.
 For example:
 
     python evaluate_model.py a_data/04_model_input/test_42/ a_data/06_model_output/rf_default_test_42/ c_reportings/scores_rf_default_test_42.csv
-
 
 ## Which scripts I can edit?
 
