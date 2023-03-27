@@ -148,7 +148,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     dict_aux.update({f"flag_{i}": v for i, v in zip(range(max_hours), np.transpose(outcome_flags_torch_aux))})
     dict_aux.update({"patient_id": [i[0] for i in patients], "outcome": [i[0] for i in outcomes], "cpc": [i[0] for i in cpcs]})
     df_aux = pd.DataFrame(dict_aux)
-    df_aux.to_csv(os.path.join(model_folder, "torch_predictions.csv"), index=False)
+    #df_aux.to_csv(os.path.join(model_folder, "torch_predictions.csv"), index=False)
 
     # Train the models.
     if verbose >= 1:
