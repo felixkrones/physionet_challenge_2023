@@ -142,6 +142,9 @@ If you have trouble running your code, then please try the follow steps to run t
 
         user@computer:~/example/python-example-2023$ docker run -it -v ~/example/model:/challenge/model -v ~/example/test_data:/challenge/test_data -v ~/example/test_outputs:/challenge/test_outputs -v ~/example/training_data:/challenge/training_data image bash
 
+        For example:
+        user@computer:~/example/python-example-2023$ docker run -it -v /Users/felixkrones/python_projects/example/physionet_challenge_2023/b_models:/challenge/model -v /Users/felixkrones/python_projects/data/physionet_challenge_2023/test_42:/challenge/test_data -v /Users/felixkrones/python_projects/example/physionet_challenge_2023/a_data:/challenge/test_outputs -v /Users/felixkrones/python_projects/data/physionet_challenge_2023/test_42:/challenge/training_data physionet_image bash
+
         root@[...]:/challenge# ls
             Dockerfile             README.md         test_outputs
             evaluate_model.py      requirements.txt  training_data
