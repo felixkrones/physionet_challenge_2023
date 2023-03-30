@@ -2,7 +2,9 @@
 
 ## What's in this repository?
 
-This repository contains the code of our Python entry for the George B. Moody PhysioNet Challenge 2023. You can try it by running the following commands on the Challenge training sets. These commands should take a few minutes or less to run from start to finish on a recent personal computer.
+This repository contains the code of our Python entry for the George B. Moody PhysioNet 
+Challenge 2023. You can try it by running the following commands on the Challenge training sets. 
+These commands should take a few minutes or less to run from start to finish on a recent personal computer.
 
 We implemented a ... model with several features.
 
@@ -25,11 +27,20 @@ You can install the dependencies for these scripts by creating a Docker image (s
 
     pip install -r requirements.txt
 
+If instead using conda
+
+   ```
+   conda create env -n env_name python=3.9
+   conda activate env_name
+   conda install pip
+   /path/to/anaconda/envs/env_name/bin/pip install -r requirements.txt
+   ```
+
 
 ### 1. Data
 
 Download the challenge data:
-1. Create and jump into data folder: `mkdir 00_raw && cd 00_raw`
+1. Create and jump into data folder: `cd a_data && mkdir 00_raw && cd 00_raw`
 2. Download: `wget -r -N -c -np https://physionet.org/files/i-care/1.0/`
 
 
