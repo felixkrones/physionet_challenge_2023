@@ -16,6 +16,7 @@ import pandas as pd
 import numpy as np, os, sys
 import mne
 import random
+import re
 from sklearn.impute import SimpleImputer
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 import joblib
@@ -521,7 +522,10 @@ class torchvisionModel(pl.LightningModule):
         self.model_name = model_name
         self.num_classes = num_classes
         self.classification = classification
-        self.model = eval(f"models.{model_name}(weights='DEFAULT')")
+        self.model = eval(f"models.{model_name}()")
+        state_dict = torch.load("densenet121-a639ec97.pth")
+        state_dict = self.update_densenet_keys(state_dict)
+        self.model.load_state_dict(state_dict)
         self.model.features[0] = nn.Conv2d(18, 64, kernel_size=7, stride=2, padding=3, bias=False)
 
         # freeze_model(self.model)
@@ -536,6 +540,16 @@ class torchvisionModel(pl.LightningModule):
             self.model.heads.head = nn.Linear(num_features, self.num_classes)
         else:
             raise NotImplementedError(f"Model {model_name} not implemented")
+        
+    def update_densenet_keys(self, state_dict):
+        pattern = re.compile(r'^(.*denselayer\d+\.(?:norm|relu|conv))\.((?:[12])\.(?:weight|bias|running_mean|running_var))$')
+        for key in list(state_dict.keys()):
+            res = pattern.match(key)
+            if res:
+                new_key = res.group(1) + res.group(2)
+                state_dict[new_key] = state_dict[key]
+                del state_dict[key]
+        return state_dict
 
     def remove_head(self):
         if "resnet" in self.model_name.lower():

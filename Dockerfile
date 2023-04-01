@@ -12,6 +12,7 @@ WORKDIR /challenge
 ## Install your dependencies here using apt install, etc.
 RUN apt update
 RUN apt install -y libsndfile1-dev
+RUN wget "https://download.pytorch.org/models/densenet121-a639ec97.pth"
 
 ## Include the following line if you have a requirements.txt file.
 RUN pip install -r requirements.txt

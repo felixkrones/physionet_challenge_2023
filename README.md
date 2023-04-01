@@ -63,7 +63,7 @@ where
 
 For example:
 
-    python train_model.py a_data/04_model_input/train_42/ b_models/rf_default/
+    python train_model.py /Users/felixkrones/python_projects/data/physionet_challenge_2023/train_42/ b_models/rf_default/
 
 ### 4. Predict
 
@@ -145,7 +145,7 @@ If you have trouble running your code, then please try the follow steps to run t
 
         user@computer:~/example$ cd python-example-2023/
 
-        user@computer:~/example/python-example-2023$ docker build -t image .
+        user@computer:~/example/python-example-2023$ docker build -t physionet_image .
 
         Sending build context to Docker daemon  [...]kB
         [...]
