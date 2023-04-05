@@ -203,7 +203,7 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
     patient_metadata, recording_metadata, recording_data = load_challenge_data(data_folder, patient_id)
 
     # Torch prediction
-    data_set = EEGDataset(data_folder, patient_ids = [patient_id], device = device)
+    data_set = EEGDataset(data_folder, patient_ids = [patient_id], device = device, load_labels = False)
     data_loader = DataLoader(data_set, batch_size=1, num_workers=4, shuffle=False)
     output_list, patient_id_list, hour_list, quality_list = torch_prediction(torch_model, data_loader, device)
     agg_outcome_probability_torch, outcome_probabilities_torch, outcome_flags_torch = torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id)
@@ -448,7 +448,7 @@ def get_features(patient_metadata, recording_metadata, recording_data, return_as
 
 class EEGDataset(Dataset):
     def __init__(
-        self, data_folder, patient_ids, device
+        self, data_folder, patient_ids, device, load_labels: bool=True
     ):
         self.channels = ['Fp1-F7', 'F7-T3', 'T3-T5', 'T5-O1', 'Fp2-F8', 'F8-T4', 'T4-T6', 'T6-O2', 'Fp1-F3',
             'F3-C3', 'C3-P3', 'P3-O1', 'Fp2-F4', 'F4-C4', 'C4-P4', 'P4-O2', 'Fz-Cz', 'Cz-Pz']
@@ -466,7 +466,10 @@ class EEGDataset(Dataset):
             recording_ids = get_column(recording_metadata, 'Record', str)
             hours = get_column(recording_metadata, 'Hour', str)
             qualities = get_column(recording_metadata, 'Quality', str)
-            current_outcome = get_outcome(patient_metadata)
+            if load_labels:
+                current_outcome = get_outcome(patient_metadata)
+            else:
+                current_outcome = 0
             for recording_id, hour, quality in zip(recording_ids, hours, qualities):
                 if recording_id != 'nan':
                     recording_location = os.path.join(data_folder, patient_id, recording_id)
