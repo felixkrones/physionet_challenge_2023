@@ -79,7 +79,7 @@ where
 
 For example:
 
-    python run_model.py b_models/rf_default/ a_data/04_model_input/test_42/ a_data/06_model_output/rf_default_test_42/
+    python run_model.py b_models/rf_default/ /Users/felixkrones/python_projects/data/physionet_challenge_2023/test_42/ a_data/06_model_output/rf_default_test_42/
 
 ### 5. Evaluate
 
@@ -93,7 +93,7 @@ and `scores.csv` (optional) is a collection of scores for your model.
 
 For example:
 
-    python evaluate_model.py a_data/04_model_input/test_42/ a_data/06_model_output/rf_default_test_42/ c_reportings/scores_rf_default_test_42.csv
+    python evaluate_model.py /Users/felixkrones/python_projects/data/physionet_challenge_2023/test_42/ a_data/06_model_output/rf_default_test_42/ c_reportings/scores_rf_default_test_42.csv
 
 ## Which scripts I can edit?
 
@@ -180,6 +180,7 @@ We included a few other scripts that we will use to run your code. You can use t
 - `remove_data.py`: Remove the binary signal data, i.e., the EEG recordings. Usage: run `python remove_data.py -i input_folder -o output_folder` to copy the labels and metadata from `input_folder` to `output_folder`.
 - `remove_labels.py`: Remove the labels. Usage: run `python remove_labels.py -i input_folder -o output_folder` to copy the data and metadata from `input_folder` to `output_folder`.
 - `truncate_data.py`: Truncate the EEG recordings. Usage: run `python truncate_data.py -i input_folder -o output_folder -k 12` to truncate the EEG recordings to 12 hours. We will run your trained models on data with 12, 24, 48, and 72 hours of data.
+For example: `python truncate_data.py -i /Users/felixkrones/python_projects/data/physionet_challenge_2023/test_42/ -o /Users/felixkrones/python_projects/data/physionet_challenge_2023/test_42_12h/ -k 12`
 
 
 ## How do I learn more?

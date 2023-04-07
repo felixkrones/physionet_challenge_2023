@@ -278,13 +278,17 @@ def torch_prediction(model, data_loader, device):
 def torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id, max_hours=72, min_quality=0):
     # Get the predictions for the patient
     patient_mask = np.array([True if p == patient_id else False for p in patient_id_list])
-    outcome_probabilities_torch = np.array(output_list)[patient_mask]
-    hours_patients = np.array(hour_list)[patient_mask].astype(int).tolist()
-
-    if len(outcome_probabilities_torch[0]) == 1:
-        outcome_probabilities_torch = [i[0] for i in outcome_probabilities_torch]
+    if len(patient_mask) == 0:
+        outcome_probabilities_torch = np.array([])
+        hours_patients = np.array([])
     else:
-        raise ValueError("The torch model should only predict one value per patient.")
+        outcome_probabilities_torch = np.array(output_list)[patient_mask]
+        hours_patients = np.array(hour_list)[patient_mask].astype(int).tolist()
+
+        if len(outcome_probabilities_torch[0]) == 1:
+            outcome_probabilities_torch = [i[0] for i in outcome_probabilities_torch]
+        else:
+            raise ValueError("The torch model should only predict one value per patient.")
 
     #  Get values for the first 72 hours
     outcome_probabilities_torch = [outcome_probabilities_torch[hours_patients.index(hour)] if hour in hours_patients else np.nan for hour in range(max_hours)]
