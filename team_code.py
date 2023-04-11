@@ -46,12 +46,12 @@ def train_challenge_model(data_folder, model_folder, verbose):
     val_size = 0.2
     max_hours = 72
     min_quality = 0.0
-    max_epochs = 2
+    max_epochs = 5
 
     # Get device
-    device = "cpu" #torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
-    accelerator = "cpu" # "gpu" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-    print(f"Using device {device}")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    accelerator = "gpu" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    print(f"Using device {device} and accelerator {accelerator}")
 
     # Find data files.
     if verbose >= 1:
@@ -82,21 +82,20 @@ def train_challenge_model(data_folder, model_folder, verbose):
     train_dataset = EEGDataset(data_folder, patient_ids = train_ids, device=device)
     val_dataset = EEGDataset(data_folder, patient_ids = val_ids, device=device)
     torch_dataset = EEGDataset(data_folder, patient_ids = patient_ids, device=device)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=4, shuffle=True, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=4, shuffle=False, pin_memory=True)
-    data_loader = DataLoader(torch_dataset, batch_size=batch_size, num_workers=4, shuffle=False, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=os.cpu_count(), shuffle=True, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=os.cpu_count(), shuffle=False, pin_memory=True)
+    data_loader = DataLoader(torch_dataset, batch_size=batch_size, num_workers=os.cpu_count(), shuffle=False, pin_memory=True)
 
     # Find last checkpoint
     resume_from_checkpoint = get_last_chkpt(model_folder)
 
     # Train torch model
-    torch_model = get_tv_model(batch_size=batch_size, d_size=len(train_loader)).to(device)
+    torch_model = get_tv_model(batch_size=batch_size, d_size=len(train_loader))
     trainer = pl.Trainer(
         accelerator=accelerator,
         callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", every_n_epochs=1, save_last=True, save_top_k=1)],
         log_every_n_steps=1,
         max_epochs=max_epochs,
-        gpus=1,
         enable_progress_bar=True,
         logger=TensorBoardLogger(model_folder, name=''),
         resume_from_checkpoint=resume_from_checkpoint,
@@ -197,14 +196,14 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
     torch_model = models['torch_model']
 
     # Get device
-    device = "cpu" #torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 
     # Load data.
     patient_metadata, recording_metadata, recording_data = load_challenge_data(data_folder, patient_id)
 
     # Torch prediction
     data_set = EEGDataset(data_folder, patient_ids = [patient_id], device = device, load_labels = False)
-    data_loader = DataLoader(data_set, batch_size=1, num_workers=4, shuffle=False)
+    data_loader = DataLoader(data_set, batch_size=1, num_workers=os.cpu_count(), shuffle=False)
     output_list, patient_id_list, hour_list, quality_list = torch_prediction(torch_model, data_loader, device)
     agg_outcome_probability_torch, outcome_probabilities_torch, outcome_flags_torch = torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id)
 
@@ -258,6 +257,7 @@ def get_last_chkpt(model_folder):
 
 def torch_prediction(model, data_loader, device):
     model.eval()
+    model.to(device)
     with torch.no_grad():
         output_list = []
         patient_id_list = []
@@ -506,8 +506,8 @@ class EEGDataset(Dataset):
         hour = self.hours[idx]
         quality = self.qualities[idx]
 
-        signal_data = signal_data.to(self.device)
-        label = torch.from_numpy(np.array(label)).to(self._precision).to(self.device)
+        signal_data = signal_data
+        label = torch.from_numpy(np.array(label)).to(self._precision)
 
         return {"image": signal_data, "label": label, "id": id, "hour": hour, "quality": quality}
 
