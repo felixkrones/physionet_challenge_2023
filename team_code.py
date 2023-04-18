@@ -44,7 +44,7 @@ PARAMS_CUT = {'max_hours': 72, 'min_quality': 0.0, 'num_signals': None}
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose):
     params_cut = PARAMS_CUT
-    params_torch = {'batch_size': 64, 'val_size': 0.2, 'max_epochs': 5, 'pretrained': True, 'devices': 4, 'num_nodes': 1}
+    params_torch = {'batch_size': 64, 'val_size': 0.2, 'max_epochs': 5, 'pretrained': True, 'devices': 1, 'num_nodes': 1}
     c_model = "rf" # "xgb" or "rf
     params_rf = {'n_estimators': 123, 'max_depth': 8, 'max_leaf_nodes': None, 'random_state': 42, 'n_jobs': 8}
     params_xgb = {'max_depth': 8, 'eval_metric': 'auc', 'nthread': 8}
