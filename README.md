@@ -21,6 +21,16 @@ The [Challenge website](https://physionetchallenges.org/2023/#data) provides a t
 
 ## How do I run these scripts?
 
+### Use shell scrips
+You can either run the following steps from the terminal or create a shell script to run all your comments after each other:
+1. Create shell script file, e.g. `run_scripts.sh`
+2. First line must contain `#!/bin/bash`
+3. Activate your environment either from the terminal or add it to the shell script
+4. After that add the code you want to run, e.g. `python train_model.py training_data model`
+5. Make the file executable with `chmod +x run_scripts.sh`
+6. Run the file `./run_scripts.sh`
+
+
 ### 0. Dependencies
 
 You can install the dependencies for these scripts by creating a Docker image (see below) and running

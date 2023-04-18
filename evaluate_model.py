@@ -13,6 +13,9 @@
 # described on the Challenge webpage.
 
 import os, os.path, sys, numpy as np
+from sklearn.metrics import roc_auc_score, roc_curve
+import matplotlib.pyplot as plt
+
 from helper_code import *
 
 # Evaluate the models.
@@ -23,7 +26,7 @@ def evaluate_model(label_folder, output_folder):
 
     # Evaluate the models.
     challenge_score = compute_challenge_score(label_outcomes, output_outcome_probabilities)
-    auroc_outcomes, auprc_outcomes = compute_auc(label_outcomes, output_outcome_probabilities)
+    auroc_outcomes, auprc_outcomes, sklearn_auc, sklearn_roc = compute_auc(label_outcomes, output_outcome_probabilities)
     accuracy_outcomes, _, _ = compute_accuracy(label_outcomes, output_outcomes)
     f_measure_outcomes, _, _ = compute_f_measure(label_outcomes, output_outcomes)
 
@@ -31,7 +34,7 @@ def evaluate_model(label_folder, output_folder):
     mae_cpcs = compute_mae(label_cpcs, output_cpcs)
 
     # Return the results.
-    return challenge_score, auroc_outcomes, auprc_outcomes, accuracy_outcomes, f_measure_outcomes, mse_cpcs, mae_cpcs
+    return challenge_score, auroc_outcomes, auprc_outcomes, accuracy_outcomes, f_measure_outcomes, mse_cpcs, mae_cpcs, sklearn_auc, sklearn_roc
 
 # Compute the Challenge score.
 def compute_challenge_score(labels, outputs):
@@ -161,7 +164,10 @@ def compute_auc(labels, outputs):
         auroc += 0.5 * (tpr[j+1] - tpr[j]) * (tnr[j+1] + tnr[j])
         auprc += (tpr[j+1] - tpr[j]) * ppv[j+1]
 
-    return auroc, auprc
+    sklearn_auc = roc_auc_score(labels, outputs)
+    sklearn_roc = roc_curve(labels, outputs)
+
+    return auroc, auprc, sklearn_auc, sklearn_roc
 
 # Construct the one-hot encoding of data for the given classes.
 def compute_one_hot_encoding(data, classes):
@@ -290,17 +296,29 @@ if __name__ == '__main__':
     scores = evaluate_model(sys.argv[1], sys.argv[2])
 
     # Unpack the scores.
-    challenge_score, auroc_outcomes, auprc_outcomes, accuracy_outcomes, f_measure_outcomes, mse_cpcs, mae_cpcs = scores
+    challenge_score, auroc_outcomes, auprc_outcomes, accuracy_outcomes, f_measure_outcomes, mse_cpcs, mae_cpcs, sklearn_auc, sklearn_roc = scores
 
     # Construct a string with scores.
     output_string = \
         'Challenge Score: {:.3f}\n'.format(challenge_score) + \
-        'Outcome AUROC: {:.3f}\n'.format(auroc_outcomes) + \
-        'Outcome AUPRC: {:.3f}\n'.format(auprc_outcomes) + \
+        'Outcome AUROC TNR_TPR: {:.3f}\n'.format(auroc_outcomes) + \
+        'Sklearn AUROC TPR_FPR: {:.3f}\n'.format(sklearn_auc) + \
+        'Outcome AUPRC PPV_TPR: {:.3f}\n'.format(auprc_outcomes) + \
         'Outcome Accuracy: {:.3f}\n'.format(accuracy_outcomes) + \
         'Outcome F-measure: {:.3f}\n'.format(f_measure_outcomes) + \
         'CPC MSE: {:.3f}\n'.format(mse_cpcs) + \
         'CPC MAE: {:.3f}\n'.format(mae_cpcs)
+    
+    # Plot the ROC curve from sklearn_roc and save it to a file.
+    roc_path = f'{"/".join(sys.argv[3].split("/")[:-1])}/'
+    if not os.path.exists(roc_path):
+        os.makedirs(roc_path, exist_ok=True)
+    plt.figure()
+    plt.plot(sklearn_roc[0], sklearn_roc[1])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('ROC Curve')
+    plt.savefig(f'{roc_path}/roc_curve.png')
 
     # Output the scores to screen and/or a file.
     if len(sys.argv) == 3:

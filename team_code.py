@@ -19,6 +19,7 @@ import random
 import re
 from sklearn.impute import SimpleImputer
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+import xgboost as xgb
 import joblib
 import timm
 import torch
@@ -32,21 +33,21 @@ import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 from tqdm import tqdm
-
+import matplotlib.pyplot as plt
 
 ################################################################################
 #
 # Required functions. Edit these functions to add your code, but do not change the arguments of the functions.
 #
 ################################################################################
-
+PARAMS_CUT = {'max_hours': 72, 'min_quality': 0.0, 'num_signals': None}
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose):
-    batch_size = 64
-    val_size = 0.2
-    max_hours = 72
-    min_quality = 0.0
-    max_epochs = 5
+    params_cut = PARAMS_CUT
+    params_torch = {'batch_size': 64, 'val_size': 0.2, 'max_epochs': 2, 'pretrained': True, 'devices': 1, 'num_nodes': 1}
+    c_model = "rf" # "xgb" or "rf
+    params_rf = {'n_estimators': 123, 'max_depth': 8, 'max_leaf_nodes': None, 'random_state': 42, 'n_jobs': 8}
+    params_xgb = {'max_depth': 8, 'eval_metric': 'auc', 'nthread': 8}
 
     # Get device
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
@@ -55,13 +56,13 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
     # Find data files.
     if verbose >= 1:
-        print('Finding the Challenge data...')
+        print('Finding the challenge data...')
 
     patient_ids = find_data_folders(data_folder)
     num_patients = len(patient_ids)
 
     # Split into train and validation set
-    num_val = int(num_patients * val_size)
+    num_val = int(num_patients * params_torch['val_size'])
     num_train = num_patients - num_val
     patient_ids_aux = patient_ids.copy()
     #random.shuffle(patient_ids_aux) #TODO: Add back in
@@ -76,60 +77,64 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
     # Extract the features and labels.
     if verbose >= 1:
-        print('Extracting features and labels from the Challenge data...')
+        print('Extracting features and labels from the challenge data...')
 
     # Get DL data
     train_dataset = EEGDataset(data_folder, patient_ids = train_ids, device=device)
     val_dataset = EEGDataset(data_folder, patient_ids = val_ids, device=device)
     torch_dataset = EEGDataset(data_folder, patient_ids = patient_ids, device=device)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=os.cpu_count(), shuffle=True, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, num_workers=os.cpu_count(), shuffle=False, pin_memory=True)
-    data_loader = DataLoader(torch_dataset, batch_size=batch_size, num_workers=os.cpu_count(), shuffle=False, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=params_torch['batch_size'], num_workers=os.cpu_count(), shuffle=True, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=params_torch['batch_size'], num_workers=os.cpu_count(), shuffle=False, pin_memory=True)
+    data_loader = DataLoader(torch_dataset, batch_size=params_torch['batch_size'], num_workers=os.cpu_count(), shuffle=False, pin_memory=True)
 
     # Find last checkpoint
-    resume_from_checkpoint = get_last_chkpt(model_folder)
+    checkpoint_path = get_last_chkpt(model_folder)
 
     # Train torch model
-    torch_model = get_tv_model(batch_size=batch_size, d_size=len(train_loader))
+    torch_model = get_tv_model(batch_size=params_torch['batch_size'], d_size=len(train_loader), pretrained=params_torch['pretrained'])
     trainer = pl.Trainer(
         accelerator=accelerator,
+        devices=params_torch["devices"],
+        num_nodes=params_torch["num_nodes"],
         callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", every_n_epochs=1, save_last=True, save_top_k=1)],
         log_every_n_steps=1,
-        max_epochs=max_epochs,
+        max_epochs=params_torch['max_epochs'],
         enable_progress_bar=True,
         logger=TensorBoardLogger(model_folder, name=''),
-        resume_from_checkpoint=resume_from_checkpoint,
     )
     trainer.logger._default_hp_metric = False
     print("Start training torch model...")
-    trainer.fit(torch_model, train_loader, val_loader)
-    print("Finished training torch model. Now calculating predictions...")
+    trainer.fit(torch_model, train_loader, val_loader, ckpt_path=checkpoint_path)
+    print("Finished training torch model. Now calculating torch predictions...")
 
     output_list, patient_id_list, hour_list, quality_list = torch_prediction(torch_model, data_loader, device)
     
-
     features = list()
+    feature_names = list()
     outcomes = list()
     patients = list()
     cpcs = list()
     patient_ids_aux = list()
     outcome_probabilities_torch_aux = list()
     outcome_flags_torch_aux = list()
-    for i in range(num_patients):
+    print("Done with torch, now calculating features...")
+    for i in tqdm(range(num_patients)):
         if verbose >= 2:
             print('    {}/{}...'.format(i+1, num_patients))
 
         # Load data and extract features
         patient_id = patient_ids[i]
         patient_metadata, recording_metadata, recording_data = load_challenge_data(data_folder, patient_id)
-        current_features = get_features(patient_metadata, recording_metadata, recording_data, max_hours=max_hours, min_quality=min_quality)
+        current_features, current_feature_names = get_features(patient_metadata, recording_metadata, recording_data, **params_cut)
 
         # Get torch predictions
-        agg_outcome_probability_torch, outcome_probabilities_torch, outcome_flags_torch = torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id, max_hours=max_hours, min_quality=min_quality)
-        current_features = np.hstack((current_features, outcome_probabilities_torch)) #TODO: Combine new torch features
+        agg_outcome_probability_torch, outcome_probabilities_torch, outcome_flags_torch = torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id, **params_cut)
+        current_features = np.hstack((current_features, outcome_probabilities_torch)) #TODO: Combine new torch features, e.g. add outcome_flags_torch
+        current_feature_names = np.hstack((current_feature_names, [f"prob_torch_{i}" for i in range(len(outcome_probabilities_torch))]))
 
         # Extract labels.
         features.append(current_features)
+        feature_names.append(current_feature_names)
         current_outcome = get_outcome(patient_metadata)
         outcomes.append(current_outcome)
         current_cpc = get_cpc(patient_metadata)
@@ -139,40 +144,50 @@ def train_challenge_model(data_folder, model_folder, verbose):
         outcome_flags_torch_aux.append(outcome_flags_torch)
 
     features = np.vstack(features)
+    feature_names = np.vstack(feature_names)
     outcomes = np.vstack(outcomes)
     patients = np.vstack(patients)
     cpcs = np.vstack(cpcs)
     outcome_probabilities_torch_aux = np.vstack(outcome_probabilities_torch_aux)
     outcome_flags_torch_aux = np.vstack(outcome_flags_torch_aux)
-    dict_aux = {f"prob_{i}": v for i, v in zip(range(max_hours), np.transpose(outcome_probabilities_torch_aux))}
-    dict_aux.update({f"flag_{i}": v for i, v in zip(range(max_hours), np.transpose(outcome_flags_torch_aux))})
-    dict_aux.update({"patient_id": [i[0] for i in patients], "outcome": [i[0] for i in outcomes], "cpc": [i[0] for i in cpcs]})
-    df_aux = pd.DataFrame(dict_aux)
+    #dict_aux = {f"prob_{i}": v for i, v in zip(range(params_cut['max_hours']), np.transpose(outcome_probabilities_torch_aux))}
+    #dict_aux.update({f"flag_{i}": v for i, v in zip(range(params_cut['max_hours']), np.transpose(outcome_flags_torch_aux))})
+    #dict_aux.update({"patient_id": [i[0] for i in patients], "outcome": [i[0] for i in outcomes], "cpc": [i[0] for i in cpcs]})
+    #df_aux = pd.DataFrame(dict_aux)
     #df_aux.to_csv(os.path.join(model_folder, "torch_predictions.csv"), index=False)
-
-    # Train the models.
-    if verbose >= 1:
-        print('Training the Challenge models on the Challenge data...')
-
-    # Define parameters for random forest classifier and regressor.
-    n_estimators = 123  # Number of trees in the forest.
-    max_leaf_nodes = None  # Maximum number of leaf nodes in each tree.
-    max_depth = 8
-    random_state = 42  # Random state; set for reproducibility.
 
     # Impute any missing features; use the mean value by default.
     imputer = SimpleImputer().fit(features)
     features = imputer.transform(features)
 
     # Train the models.
-    print("Start training rf models...")
-    outcome_model = RandomForestClassifier(
-        n_estimators=n_estimators, max_leaf_nodes=max_leaf_nodes, max_depth=max_depth, random_state=random_state).fit(features, outcomes.ravel())
-    cpc_model = RandomForestRegressor(
-        n_estimators=n_estimators, max_leaf_nodes=max_leaf_nodes, max_depth=max_depth, random_state=random_state).fit(features, cpcs.ravel())
+    print("Start training challenge models...")
+    if c_model == "rf":
+        outcome_model = RandomForestClassifier(**params_rf)
+        cpc_model = RandomForestRegressor(**params_rf)
+    elif c_model == "xgb":
+        outcome_model = xgb.XGBClassifier(**params_xgb)
+        cpc_model = xgb.XGBRegressor(**params_xgb)
 
+    outcome_model.fit(features, outcomes.ravel())
+    cpc_model.fit(features, cpcs.ravel())
+    
     # Save the models.
     save_challenge_model(model_folder, imputer, outcome_model, cpc_model, torch_model)
+
+    # Plot and save feature importance
+    feature_importance = outcome_model.feature_importances_
+    feature_importance = 100.0 * (feature_importance / feature_importance.max())
+    sorted_idx = np.argsort(feature_importance)
+    pos = np.arange(sorted_idx.shape[0]) + .5
+    plt.figure(figsize=(12, len(feature_importance)/2))
+    plt.barh(pos, feature_importance[sorted_idx], align='center')
+    plt.yticks(pos, np.array(feature_names[0])[sorted_idx])
+    plt.xlabel('Relative Importance')
+    plt.title('Variable Importance')
+    plt.tight_layout()
+    plt.savefig(os.path.join(model_folder, "feature_importance.png"))
+    plt.close()
 
     if verbose >= 1:
         print('Done.')
@@ -190,6 +205,8 @@ def load_challenge_models(model_folder, verbose):
 # Run your trained models. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function.
 def run_challenge_models(models, data_folder, patient_id, verbose):
+    params_cut = PARAMS_CUT
+
     imputer = models['imputer']
     outcome_model = models['outcome_model']
     cpc_model = models['cpc_model']
@@ -205,11 +222,11 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
     data_set = EEGDataset(data_folder, patient_ids = [patient_id], device = device, load_labels = False)
     data_loader = DataLoader(data_set, batch_size=1, num_workers=os.cpu_count(), shuffle=False)
     output_list, patient_id_list, hour_list, quality_list = torch_prediction(torch_model, data_loader, device)
-    agg_outcome_probability_torch, outcome_probabilities_torch, outcome_flags_torch = torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id)
+    agg_outcome_probability_torch, outcome_probabilities_torch, outcome_flags_torch = torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id,  **params_cut)
 
     # Extract features.
-    features = get_features(patient_metadata, recording_metadata, recording_data) 
-    features = np.hstack((features, outcome_probabilities_torch)) #TODO: Combine new torch features
+    features, _ = get_features(patient_metadata, recording_metadata, recording_data, **params_cut) 
+    features = np.hstack((features, outcome_probabilities_torch)) #TODO: Combine new torch features, e.g. add outcome_flags_torch
     features = features.reshape(1, -1)
 
     # Impute missing data.
@@ -238,21 +255,22 @@ def get_last_chkpt(model_folder):
         last_version = 0
         for folder in os.listdir(model_folder):
             if "version_" in folder:
-                last_version = max(last_version, int(folder.split("_")[-1]))
+                if "checkpoints" in os.path.join(model_folder, folder):
+                    last_version = max(last_version, int(folder.split("_")[-1]))
         last_version = f"version_{last_version}"
         if os.path.isfile(f"{model_folder}/{last_version}/checkpoints/last.ckpt"):
-            resume_from_checkpoint = f"{model_folder}/{last_version}/checkpoints/last.ckpt"
+            checkpoint_path = f"{model_folder}/{last_version}/checkpoints/last.ckpt"
         else:
-            resume_from_checkpoint = None
+            checkpoint_path = None
     else:
-        resume_from_checkpoint = None
+        checkpoint_path = None
 
-    if resume_from_checkpoint is not None:
-        print("Resuming from checkpoint: ", resume_from_checkpoint)
+    if checkpoint_path is not None:
+        print("Resuming from checkpoint: ", checkpoint_path)
     else:
         print("No checkpoint found. Starting from scratch.")
     
-    return resume_from_checkpoint
+    return checkpoint_path
 
 
 def torch_prediction(model, data_loader, device):
@@ -275,7 +293,7 @@ def torch_prediction(model, data_loader, device):
     return output_list, patient_id_list, hour_list, quality_list
 
 
-def torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id, max_hours=72, min_quality=0):
+def torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id, max_hours=72, min_quality=0, num_signals=None):
     # Get the predictions for the patient
     patient_mask = np.array([True if p == patient_id else False for p in patient_id_list])
     if len(patient_mask) == 0:
@@ -290,7 +308,7 @@ def torch_predictions_for_patient(output_list, patient_id_list, hour_list, quali
         else:
             raise ValueError("The torch model should only predict one value per patient.")
 
-    #  Get values for the first 72 hours
+    #  Get values
     outcome_probabilities_torch = [outcome_probabilities_torch[hours_patients.index(hour)] if hour in hours_patients else np.nan for hour in range(max_hours)]
     outcome_probabilities_torch_imputed = pd.Series(outcome_probabilities_torch, dtype=object).fillna(0).tolist()
     outcome_flags_torch = [1 if hour in hours_patients else 0 for hour in range(max_hours)]
@@ -303,16 +321,34 @@ def torch_predictions_for_patient(output_list, patient_id_list, hour_list, quali
         agg_outcome_probability_torch = 0
     else:
         agg_outcome_probability_torch = sum(agg_outcome_probability_torch) / weight_sum
+
+    # Find the median of the signals where outcome_flags_torch is 1 and only keep the num_signals around the median
+    if num_signals is not None:
+        if num_signals > max_hours:
+            raise ValueError("num_signals should be smaller than max_hours.")
+        median = np.median(np.where(np.array(outcome_flags_torch) == 1)[0])
+        lower_bound = int(median - num_signals/2)
+        upper_bound = int(median + num_signals/2)
+        if lower_bound < 0:
+            upper_bound = upper_bound + abs(lower_bound)
+            lower_bound = 0
+        if upper_bound > max_hours:
+            lower_bound = lower_bound - (upper_bound - max_hours)
+            upper_bound = max_hours
+        outcome_probabilities_torch_imputed = outcome_probabilities_torch_imputed[lower_bound:upper_bound]
+        outcome_flags_torch = outcome_flags_torch[lower_bound:upper_bound]
+
     return agg_outcome_probability_torch, outcome_probabilities_torch_imputed, outcome_flags_torch
 
 
-def get_tv_model(model_name="densenet121", num_classes=1, batch_size=64, d_size=500):
+def get_tv_model(model_name="densenet121", num_classes=1, batch_size=64, d_size=500, pretrained=False):
     model = torchvisionModel(
             model_name=model_name,
             num_classes=num_classes,
             print_freq=250,
             batch_size=batch_size,
             d_size=d_size,
+            pretrained=pretrained
         )
     return model
 
@@ -345,7 +381,7 @@ def save_challenge_model(model_folder, imputer, outcome_model, cpc_model, torch_
         torch.save({"model": torch_model.state_dict()}, file_path)
 
 # Extract features from the data.
-def get_features(patient_metadata, recording_metadata, recording_data, return_as_dict=False, max_hours=73, min_quality=0.0):
+def get_features(patient_metadata, recording_metadata, recording_data, return_as_dict=False, max_hours=73, min_quality=0.0, num_signals=None):
     # Extract features from the patient metadata.
     age = get_age(patient_metadata)
     sex = get_sex(patient_metadata)
@@ -442,12 +478,13 @@ def get_features(patient_metadata, recording_metadata, recording_data, return_as
     features_dict = patient_features_dict
     features_dict.update(recording_features_dict)
     #features_dict.update({"max_hours": np.max(hours)})
-    #features = np.hstack((features, np.max(hours))) #TODO: add this back in
-
+    #features = np.hstack((features, np.max(hours))) #TODO: add this back in to add max hours as a feature
     if return_as_dict:
         return features_dict
     else:
-        return features
+        feature_values = np.fromiter(features_dict.values(), dtype=float)
+        feature_names = list(features_dict.keys())
+        return feature_values, feature_names
 
 
 class EEGDataset(Dataset):
@@ -521,6 +558,7 @@ class torchvisionModel(pl.LightningModule):
         print_freq=100,
         batch_size=10,
         d_size=500,
+        pretrained=False,
     ):
         super().__init__()
         self._d_size = d_size
@@ -530,9 +568,13 @@ class torchvisionModel(pl.LightningModule):
         self.num_classes = num_classes
         self.classification = classification
         self.model = eval(f"models.{model_name}()")
-        state_dict = torch.load("densenet121-a639ec97.pth")
-        state_dict = self.update_densenet_keys(state_dict)
-        self.model.load_state_dict(state_dict)
+        if pretrained:
+            print(f"Using pretrained {model_name} model")
+            state_dict = torch.load("densenet121-a639ec97.pth")
+            state_dict = self.update_densenet_keys(state_dict)
+            self.model.load_state_dict(state_dict)
+        else:
+            print(f"Using {model_name} model from scratch")
         self.model.features[0] = nn.Conv2d(18, 64, kernel_size=7, stride=2, padding=3, bias=False)
 
         # freeze_model(self.model)
