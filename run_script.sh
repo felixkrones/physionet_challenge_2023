@@ -1,9 +1,20 @@
 #!/bin/bash
 
-# Test
-#python train_model.py /Users/felixkrones/python_projects/data/physionet_challenge_2023/test_test/ data/02_models/test_test/
-#python run_model.py data/02_models/test_test/ /Users/felixkrones/python_projects/data/physionet_challenge_2023/test_test/ data/03_model_output/test_test/
-#python evaluate_model.py /Users/felixkrones/python_projects/data/physionet_challenge_2023/test_test/ data/03_model_output/test_test/ data//04_reportings/test_test.csv
+#SBATCH --nodes=1
+#SBATCH --mem=120G
+#SBATCH --ntasks-per-node=20
+#SBATCH --gres=gpu:v100:4
+#SBATCH --time=00:10:00
+#SBATCH --partition=devel
+#SBATCH --job-name=gmml
+#SBATCH --clusters=htc
+
+#SBATCH --mail-type=BEGIN,END
+#SBATCH --mail-user=felix.krones@oii.ox.ac.uk
+
+module load Anaconda3
+source activate /data/inet-multimodal-ai/wolf6245/envs/physionet
+conda info --env
 
 # Define and run experiment
 experiment_name=imagenet_allsignals_2e_rf
