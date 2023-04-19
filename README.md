@@ -56,9 +56,9 @@ Download the challenge data:
 
 ### 2. Split data
 
-Run the following notebook:
+Run the following script (first adjust the paramters and paths inside):
 
-    split_data.ipynb
+    split_data.py
 
 ### 3. Train
 

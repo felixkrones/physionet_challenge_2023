@@ -5,7 +5,7 @@ module load Anaconda3
 
 # Create an environment in $DATA and give it an appropriate name
 export CONPREFIX=$DATA/envs/physionet
-conda create --prefix $CONPREFIX
+#conda create --prefix $CONPREFIX
 
 # Activate your environment
 source activate $CONPREFIX
@@ -14,9 +14,12 @@ source activate $CONPREFIX
 conda install -c anaconda pillow
 conda install -c anaconda pandas
 conda install -c anaconda numpy
-conda install -c anaconda h5py
 conda install -c anaconda scikit-image
 conda install -c conda-forge matplotlib
 conda install pytorch torchvision torchaudio pytorch-cuda -c pytorch -c nvidia
+conda install -c conda-forge tensorboard
 conda install -c conda-forge timm
-conda install -c conda-forge imageio
+conda install -c conda-forge xgboost
+conda install -c conda-forge librosa
+conda install -c conda-forge mne
+conda install -c conda-forge pytorch-lightning

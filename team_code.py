@@ -34,6 +34,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import time
 
 ################################################################################
 #
@@ -55,8 +56,9 @@ def train_challenge_model(data_folder, model_folder, verbose):
     print(f"Using device {device} and accelerator {accelerator}")
 
     # Find data files.
+    start_time = time.time()
     if verbose >= 1:
-        print('Finding the challenge data...')
+        print(f'Finding the challenge data in {data_folder}...')
 
     patient_ids = find_data_folders(data_folder)
     num_patients = len(patient_ids)
@@ -104,8 +106,9 @@ def train_challenge_model(data_folder, model_folder, verbose):
     )
     trainer.logger._default_hp_metric = False
     print("Start training torch model...")
+    start_time_torch = time.time()
     trainer.fit(torch_model, train_loader, val_loader, ckpt_path=checkpoint_path)
-    print("Finished training torch model. Now calculating torch predictions...")
+    print(f"Finished training torch model for {params_torch['max_epochs']} epochs after {round((time.time()-start_time_torch)/60,4)} min. Now calculating torch predictions...")
 
     output_list, patient_id_list, hour_list, quality_list = torch_prediction(torch_model, data_loader, device)
     
@@ -190,7 +193,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     plt.close()
 
     if verbose >= 1:
-        print('Done.')
+        print(f'Done after {round((time.time()-start_time)/60,4)} min.')
 
 # Load your trained models. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function.
@@ -512,7 +515,7 @@ class EEGDataset(Dataset):
             else:
                 current_outcome = 0
             for recording_id, hour, quality in zip(recording_ids, hours, qualities):
-                if recording_id != 'nan':
+                if not is_nan(recording_id):
                     recording_location = os.path.join(data_folder, patient_id, recording_id)
                     recording_locations_list.append(recording_location)
                     patient_ids_list.append(patient_id)
