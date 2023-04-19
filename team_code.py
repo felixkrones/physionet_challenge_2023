@@ -36,12 +36,17 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import time
 
+
+PARAMS_CUT = {'max_hours': 72, 'min_quality': 0.0, 'num_signals': None}
+PARAMS_DEVICE = {"num_workers": os.cpu_count()}
+print(PARAMS_DEVICE)
+
 ################################################################################
 #
 # Required functions. Edit these functions to add your code, but do not change the arguments of the functions.
 #
 ################################################################################
-PARAMS_CUT = {'max_hours': 72, 'min_quality': 0.0, 'num_signals': None}
+
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose):
     params_cut = PARAMS_CUT
@@ -85,9 +90,9 @@ def train_challenge_model(data_folder, model_folder, verbose):
     train_dataset = EEGDataset(data_folder, patient_ids = train_ids, device=device)
     val_dataset = EEGDataset(data_folder, patient_ids = val_ids, device=device)
     torch_dataset = EEGDataset(data_folder, patient_ids = patient_ids, device=device)
-    train_loader = DataLoader(train_dataset, batch_size=params_torch['batch_size'], num_workers=os.cpu_count(), shuffle=True, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=params_torch['batch_size'], num_workers=os.cpu_count(), shuffle=False, pin_memory=True)
-    data_loader = DataLoader(torch_dataset, batch_size=params_torch['batch_size'], num_workers=os.cpu_count(), shuffle=False, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=True, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=False, pin_memory=True)
+    data_loader = DataLoader(torch_dataset, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=False, pin_memory=True)
 
     # Find last checkpoint
     checkpoint_path = get_last_chkpt(model_folder)
@@ -98,6 +103,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         accelerator=accelerator,
         devices=params_torch["devices"],
         num_nodes=params_torch["num_nodes"],
+        strategy="ddp",
         callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", every_n_epochs=1, save_last=True, save_top_k=1)],
         log_every_n_steps=1,
         max_epochs=params_torch['max_epochs'],
@@ -223,7 +229,7 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
 
     # Torch prediction
     data_set = EEGDataset(data_folder, patient_ids = [patient_id], device = device, load_labels = False)
-    data_loader = DataLoader(data_set, batch_size=1, num_workers=os.cpu_count(), shuffle=False)
+    data_loader = DataLoader(data_set, batch_size=1, num_workers=PARAMS_DEVICE["num_workers"], shuffle=False)
     output_list, patient_id_list, hour_list, quality_list = torch_prediction(torch_model, data_loader, device)
     agg_outcome_probability_torch, outcome_probabilities_torch, outcome_flags_torch = torch_predictions_for_patient(output_list, patient_id_list, hour_list, quality_list, patient_id,  **params_cut)
 
@@ -729,3 +735,18 @@ def predict_from_batches(iteration, model, device):
         output = model(images, classify=True)
 
     return output, target
+
+
+def setup_for_distributed(is_master):
+    """
+    This function disables printing when not in master process
+    """
+    import builtins as __builtin__
+    builtin_print = __builtin__.print
+
+    def print(*args, **kwargs):
+        force = kwargs.pop('force', False)
+        if is_master or force:
+            builtin_print(*args, **kwargs)
+
+    __builtin__.print = print
