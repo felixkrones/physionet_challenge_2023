@@ -7,7 +7,7 @@
 #SBATCH --clusters=htc
 #SBATCH --time=00:10:00
 #SBATCH --partition=devel
-#SBATCH --job-name=gmml
+#SBATCH --job-name=physionet
 
 #SBATCH --mail-type=BEGIN,END
 #SBATCH --mail-user=felix.krones@oii.ox.ac.uk

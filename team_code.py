@@ -38,7 +38,8 @@ import time
 
 
 PARAMS_CUT = {'max_hours': 72, 'min_quality': 0.0, 'num_signals': None}
-PARAMS_DEVICE = {"num_workers": os.cpu_count()}
+PARAMS_DEVICE = {"num_workers": 1} #os.cpu_count()}
+print(f"CPU count: {os.cpu_count()}")
 print(PARAMS_DEVICE)
 
 ################################################################################
