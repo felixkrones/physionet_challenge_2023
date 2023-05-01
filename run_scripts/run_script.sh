@@ -5,8 +5,8 @@
 #SBATCH --ntasks-per-node=28
 #SBATCH --gres=gpu:v100:1
 #SBATCH --clusters=htc
-#SBATCH --time=00:10:00
-#SBATCH --partition=devel
+#SBATCH --time=48:00:00
+#SBATCH --partition=medium
 #SBATCH --job-name=physionet
 
 #SBATCH --mail-type=BEGIN,END
@@ -19,7 +19,7 @@ conda info --env
 # Tests
 #experiment_name=test
 #seed=test
-#srun python train_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/test_${seed}/" "data/02_models/${experiment_name}/seed_${seed}/"
+#python train_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/test_${seed}/" "data/02_models/${experiment_name}/seed_${seed}/"
 #python run_model.py "data/02_models/${experiment_name}/seed_${seed}/" "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/test_${seed}/" "data/03_model_output/${experiment_name}/seed_${seed}/"
 #python evaluate_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/test_${seed}/" "data/03_model_output/${experiment_name}/seed_${seed}/" "data/04_reportings/${experiment_name}/seed_${seed}_results.csv"
 
@@ -27,26 +27,26 @@ conda info --env
 # Define and run experiment
 experiment_name=imagenet_allsignals_2e_rf
 seed=42
-srun python train_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/train_${seed}/" "data/02_models/${experiment_name}/seed_${seed}/"
+python train_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/train_${seed}/" "data/02_models/${experiment_name}/seed_${seed}/"
 python run_model.py "data/02_models/${experiment_name}/seed_${seed}/" "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/test_${seed}/" "data/03_model_output/${experiment_name}/seed_${seed}/"
 python evaluate_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/test_${seed}/" "data/03_model_output/${experiment_name}/seed_${seed}/" "data/04_reportings/${experiment_name}/seed_${seed}_results.csv"
 
-seed=21
-srun python train_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/train_${seed}/" "data/02_models/${experiment_name}/seed_${seed}/"
+seed=21 
+python train_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/train_${seed}/" "data/02_models/${experiment_name}/seed_${seed}/"
 python run_model.py "data/02_models/${experiment_name}/seed_${seed}/" "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/test_${seed}/" "data/03_model_output/${experiment_name}/seed_${seed}/"
 python evaluate_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/test_${seed}/" "data/03_model_output/${experiment_name}/seed_${seed}/" "data/04_reportings/${experiment_name}/seed_${seed}_results.csv"
 
 seed=111
-srun python train_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/train_${seed}/" "data/02_models/${experiment_name}/seed_${seed}/"
+python train_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/train_${seed}/" "data/02_models/${experiment_name}/seed_${seed}/"
 python run_model.py "data/02_models/${experiment_name}/seed_${seed}/" "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/test_${seed}/" "data/03_model_output/${experiment_name}/seed_${seed}/"
 python evaluate_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/test_${seed}/" "data/03_model_output/${experiment_name}/seed_${seed}/" "data/04_reportings/${experiment_name}/seed_${seed}_results.csv"
 
 seed=200
-srun python train_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/train_${seed}/" "data/02_models/${experiment_name}/seed_${seed}/"
+python train_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/train_${seed}/" "data/02_models/${experiment_name}/seed_${seed}/"
 python run_model.py "data/02_models/${experiment_name}/seed_${seed}/" "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/test_${seed}/" "data/03_model_output/${experiment_name}/seed_${seed}/"
 python evaluate_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/test_${seed}/" "data/03_model_output/${experiment_name}/seed_${seed}/" "data/04_reportings/${experiment_name}/seed_${seed}_results.csv"
 
 seed=666
-srun python train_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/train_${seed}/" "data/02_models/${experiment_name}/seed_${seed}/"
+python train_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/train_${seed}/" "data/02_models/${experiment_name}/seed_${seed}/"
 python run_model.py "data/02_models/${experiment_name}/seed_${seed}/" "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/test_${seed}/" "data/03_model_output/${experiment_name}/seed_${seed}/"
 python evaluate_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/test_${seed}/" "data/03_model_output/${experiment_name}/seed_${seed}/" "data/04_reportings/${experiment_name}/seed_${seed}_results.csv"

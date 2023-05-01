@@ -4,10 +4,10 @@
 
 # exclude everything
 lightning_logs/*
-data/*
+data/02_models/*
+data/03_model_output/*
 Pipfile.lock
 Pipfile
-*.csv
 *.pth
 *.out
 
