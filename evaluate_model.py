@@ -310,6 +310,7 @@ if __name__ == '__main__':
         'CPC MAE: {:.3f}\n'.format(mae_cpcs)
     
     # Plot the ROC curve from sklearn_roc and save it to a file.
+    seed = sys.argv[3].split("seed_")[-1].split("_")[0]
     roc_path = f'{"/".join(sys.argv[3].split("/")[:-1])}/'
     if not os.path.exists(roc_path):
         os.makedirs(roc_path, exist_ok=True)
@@ -318,7 +319,7 @@ if __name__ == '__main__':
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
     plt.title('ROC Curve')
-    plt.savefig(f'{roc_path}/roc_curve.png')
+    plt.savefig(f'{roc_path}/seed_{seed}_roc_curve.png')
 
     # Output the scores to screen and/or a file.
     if len(sys.argv) == 3:
