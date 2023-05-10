@@ -15,8 +15,9 @@ source activate /data/inet-multimodal-ai/wolf6245/envs/physionet
 conda info --env
 
 # Split data
-python split_data.py 42
-python split_data.py 21
-python split_data.py 111
-python split_data.py 200
-python split_data.py 666
+test_ratio=0.2
+python split_data.py 42 $test_ratio
+python split_data.py 21 $test_ratio
+python split_data.py 111 $test_ratio
+python split_data.py 200 $test_ratio
+python split_data.py 666 $test_ratio

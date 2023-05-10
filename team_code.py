@@ -51,7 +51,7 @@ print(PARAMS_DEVICE)
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose):
     params_cut = PARAMS_CUT
-    params_torch = {'batch_size': 64, 'val_size': 0.2, 'max_epochs': 5, 'pretrained': True, 'devices': 1, 'num_nodes': 1}
+    params_torch = {'batch_size': 16, 'val_size': 0.3, 'max_epochs': 10, 'pretrained': True, 'devices': 1, 'num_nodes': 1}
     c_model = "rf" # "xgb" or "rf
     params_rf = {'n_estimators': 123, 'max_depth': 8, 'max_leaf_nodes': None, 'random_state': 42, 'n_jobs': 8}
     params_xgb = {'max_depth': 8, 'eval_metric': 'auc', 'nthread': 8}
@@ -73,7 +73,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     num_val = int(num_patients * params_torch['val_size'])
     num_train = num_patients - num_val
     patient_ids_aux = patient_ids.copy()
-    #random.shuffle(patient_ids_aux) #TODO: Add back in
+    random.shuffle(patient_ids_aux) #TODO: Add back in
     train_ids = patient_ids_aux[:num_train]
     val_ids = patient_ids_aux[num_train:]
 
