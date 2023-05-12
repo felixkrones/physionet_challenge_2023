@@ -37,7 +37,7 @@ import matplotlib.pyplot as plt
 import time
 
 
-USE_TORCH = True
+USE_TORCH = False
 PARAMS_CUT = {'max_hours': 72, 'min_quality': 0.0, 'num_signals': None}
 PARAMS_DEVICE = {"num_workers": 20} #os.cpu_count()}
 print(f"CPU count: {os.cpu_count()}")

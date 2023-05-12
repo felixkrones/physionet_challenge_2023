@@ -6,7 +6,7 @@ This repository contains the code of our Python entry for the George B. Moody Ph
 Challenge 2023. You can try it by running the following commands on the Challenge training sets. 
 These commands should take a few minutes or less to run from start to finish on a recent personal computer.
 
-We implemented a ... model with several features.
+We implemented a convolutional net model with several features.
 
 This code uses four main scripts, described below, to train and run a model for the Challenge.
 

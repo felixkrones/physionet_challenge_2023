@@ -34,8 +34,8 @@ def run_split(input_dir, output_dir, random_seed, test_ratio):
 
 if __name__ == '__main__':
     # Set locations and parameters
-    input_dir = Path("/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/physionet.org/files/i-care/1.0/training")
-    output_dir = Path("/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023")
+    input_dir = Path("/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023_/physionet.org/files/i-care/1.0/training")
+    output_dir = Path("/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023_")
 
     random_seed = int(sys.argv[1])
     test_ratio = float(sys.argv[2])
