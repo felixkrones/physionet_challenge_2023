@@ -13,6 +13,7 @@ from helper_code import is_integer
 from team_code import train_challenge_model
 
 if __name__ == '__main__':
+    print("------------- train_model.py -------------")
     # Parse the arguments.
     if not (len(sys.argv) == 3 or len(sys.argv) == 4):
         raise Exception('Include the data and model folders as arguments, e.g., python train_model.py data model.')

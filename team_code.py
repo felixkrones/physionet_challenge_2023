@@ -102,7 +102,6 @@ def train_challenge_model(data_folder, model_folder, verbose):
             accelerator=accelerator,
             devices=params_torch["devices"],
             num_nodes=params_torch["num_nodes"],
-            strategy="ddp",
             callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", every_n_epochs=1, save_last=True, save_top_k=1)],
             log_every_n_steps=1,
             max_epochs=params_torch['max_epochs'],

@@ -292,6 +292,7 @@ def compute_mae(labels, outputs):
     return mae
 
 if __name__ == '__main__':
+    print("------------- evaluate_model.py -------------")
     # Compute the scores for the model outputs.
     scores = evaluate_model(sys.argv[1], sys.argv[2])
 

@@ -5,8 +5,8 @@
 #SBATCH --ntasks-per-node=28
 #SBATCH --gres=gpu:v100:1
 #SBATCH --clusters=htc
-#SBATCH --time=62:00:00
-#SBATCH --partition=long
+#SBATCH --time=48:00:00
+#SBATCH --partition=medium
 #SBATCH --job-name=physionet
 
 #SBATCH --mail-type=BEGIN,END
