@@ -53,7 +53,7 @@ print(PARAMS_DEVICE)
 def train_challenge_model(data_folder, model_folder, verbose):
     # Parameters
     params_cut = PARAMS_CUT
-    params_torch = {'batch_size': 16, 'val_size': 0.3, 'max_epochs': 5, 'pretrained': True, 'devices': 1, 'num_nodes': 1}
+    params_torch = {'batch_size': 16, 'val_size': 0.3, 'max_epochs': 10, 'pretrained': True, 'devices': 1, 'num_nodes': 1}
     c_model = "rf" # "xgb" or "rf
     params_rf = {'n_estimators': 123, 'max_depth': 8, 'max_leaf_nodes': None, 'random_state': 42, 'n_jobs': 8}
     params_xgb = {'max_depth': 8, 'eval_metric': 'auc', 'nthread': 8}
@@ -510,9 +510,7 @@ def get_features(patient_metadata, recording_metadata, recording_data, return_as
         return features_dict
     else:
         feature_values = np.fromiter(features_dict.values(), dtype=float)
-        feature_values = np.array()
         feature_names = list(features_dict.keys())
-        feature_names = list()
         return feature_values, feature_names
 
 

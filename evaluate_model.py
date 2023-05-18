@@ -33,8 +33,32 @@ def evaluate_model(label_folder, output_folder):
     mse_cpcs = compute_mse(label_cpcs, output_cpcs)
     mae_cpcs = compute_mae(label_cpcs, output_cpcs)
 
+    # Subgroup evaluation
+    sex_list = list()
+    num_patients = len(patient_ids)
+    for i in range(num_patients):
+        string = os.path.join(label_folder, patient_ids[i], patient_ids[i] + '.txt')
+        if os.path.isfile(string):
+            patient_metadata = load_text_file(string)
+        else:
+            raise ValueError(f"No such file {string}")
+        sex = get_sex(patient_metadata)
+        sex_list.append(sex)
+    unique_sex = np.unique([sex for sex in sex_list if sex is not None])
+    subgroup_scores = dict()
+    subgroup_aucs = dict()
+    for s in unique_sex:
+        if s != "nan":
+            n = len(np.where(np.array(sex_list)==s)[0])
+            idx = np.where(np.array(sex_list)==s)[0]
+            l_f = np.array([label_outcomes[i] for i in idx])
+            o_f = np.array([output_outcome_probabilities[i] for i in idx])
+            subgroup_scores[f"{s} (n={n})"] = compute_challenge_score(l_f, o_f)
+            subgroup_aucs[f"{s} (n={n})"] = compute_auc(l_f, o_f)[0]
+
     # Return the results.
-    return challenge_score, auroc_outcomes, auprc_outcomes, accuracy_outcomes, f_measure_outcomes, mse_cpcs, mae_cpcs, sklearn_auc, sklearn_roc
+    return challenge_score, auroc_outcomes, auprc_outcomes, accuracy_outcomes, f_measure_outcomes, mse_cpcs, mae_cpcs, sklearn_auc, sklearn_roc, subgroup_scores, subgroup_aucs
+
 
 # Compute the Challenge score.
 def compute_challenge_score(labels, outputs):
@@ -293,11 +317,13 @@ def compute_mae(labels, outputs):
 
 if __name__ == '__main__':
     print("------------- evaluate_model.py -------------")
+    fontsize = 12
+
     # Compute the scores for the model outputs.
     scores = evaluate_model(sys.argv[1], sys.argv[2])
 
     # Unpack the scores.
-    challenge_score, auroc_outcomes, auprc_outcomes, accuracy_outcomes, f_measure_outcomes, mse_cpcs, mae_cpcs, sklearn_auc, sklearn_roc = scores
+    challenge_score, auroc_outcomes, auprc_outcomes, accuracy_outcomes, f_measure_outcomes, mse_cpcs, mae_cpcs, sklearn_auc, sklearn_roc, subgroup_scores, subgroup_aucs = scores
 
     # Construct a string with scores.
     output_string = \
@@ -308,7 +334,9 @@ if __name__ == '__main__':
         'Outcome Accuracy: {:.3f}\n'.format(accuracy_outcomes) + \
         'Outcome F-measure: {:.3f}\n'.format(f_measure_outcomes) + \
         'CPC MSE: {:.3f}\n'.format(mse_cpcs) + \
-        'CPC MAE: {:.3f}\n'.format(mae_cpcs)
+        'CPC MAE: {:.3f}\n'.format(mae_cpcs) + \
+        f'Subgroup scores: {subgroup_scores}\n' + \
+        f'Subgroup auc: {subgroup_aucs}'
     
     # Plot the ROC curve from sklearn_roc and save it to a file.
     seed = sys.argv[3].split("seed_")[-1].split("_")[0]
@@ -317,9 +345,12 @@ if __name__ == '__main__':
         os.makedirs(roc_path, exist_ok=True)
     plt.figure()
     plt.plot(sklearn_roc[0], sklearn_roc[1])
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title('ROC Curve')
+    plt.axvline(x=0.05, color="black")
+    plt.xlabel('False Positive Rate', fontsize=fontsize)
+    plt.ylabel('True Positive Rate', fontsize=fontsize)
+    plt.title(f'ROC Curve (seed {seed}), AUC = {round(auroc_outcomes,3)}, score = {round(challenge_score,3)}', fontsize=fontsize*1.2)
+    plt.xticks(fontsize=fontsize*0.9)
+    plt.yticks(fontsize=fontsize*0.9)
     plt.savefig(f'{roc_path}/seed_{seed}_roc_curve.png')
 
     # Output the scores to screen and/or a file.
@@ -328,3 +359,35 @@ if __name__ == '__main__':
     elif len(sys.argv) == 4:
         with open(sys.argv[3], 'w') as f:
             f.write(output_string)
+
+    # Plot all AUC curves into same plot
+    save_path_all_roc = f'{roc_path}/all_seeds_roc_curve.png'
+    if not os.path.exists(save_path_all_roc):
+        parent_path = sys.argv[2].split("seed")[0]
+        list_folders = os.listdir(parent_path)
+        list_folders = [f for f in list_folders if "seed" in f]
+        seeds = list()
+        sklearn_rocs = list()
+        aucs = list()
+        score_list = list()
+        for folder in list_folders:
+            seed = folder.split("seed_")[-1].split("_")[0]
+            seeds.append(seed)
+            label_folder = ('_').join(sys.argv[1].split("_")[:-1]) + f"_{seed}/"
+            output_folder = sys.argv[2].split("seed")[0] + folder
+            scores = evaluate_model(label_folder, output_folder)
+            sklearn_rocs.append(scores[8])
+            aucs.append(scores[1])
+            score_list.append(scores[0])
+        
+        plt.figure(figsize=(12, 10))
+        for i in range(len(seeds)):
+            plt.plot(sklearn_rocs[i][0], sklearn_rocs[i][1], label=f"seed_{seeds[i]} ({round(aucs[i],3)}, {round(score_list[i],3)})")
+        plt.axvline(x=0.05, color='black', label='0.05 FPR threshold')
+        plt.xlabel('False Positive Rate', fontsize=fontsize*1.7)
+        plt.ylabel('True Positive Rate', fontsize=fontsize*1.7)
+        plt.title('ROC Curves for various data splits', fontsize=fontsize*1.9)
+        plt.xticks(fontsize=fontsize*1.4)
+        plt.yticks(fontsize=fontsize*1.4)
+        plt.legend(fontsize=fontsize*1.4)
+        plt.savefig(save_path_all_roc)
