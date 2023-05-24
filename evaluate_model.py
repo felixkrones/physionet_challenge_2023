@@ -362,10 +362,10 @@ if __name__ == '__main__':
 
     # Plot all AUC curves into same plot
     save_path_all_roc = f'{roc_path}/all_seeds_roc_curve.png'
-    if not os.path.exists(save_path_all_roc):
-        parent_path = sys.argv[2].split("seed")[0]
-        list_folders = os.listdir(parent_path)
-        list_folders = [f for f in list_folders if "seed" in f]
+    parent_path = sys.argv[2].split("seed")[0]
+    list_folders = os.listdir(parent_path)
+    list_folders = [f for f in list_folders if "seed" in f]
+    if len(list_folders) > 3:
         seeds = list()
         sklearn_rocs = list()
         aucs = list()
@@ -379,7 +379,6 @@ if __name__ == '__main__':
             sklearn_rocs.append(scores[8])
             aucs.append(scores[1])
             score_list.append(scores[0])
-        
         plt.figure(figsize=(12, 10))
         for i in range(len(seeds)):
             plt.plot(sklearn_rocs[i][0], sklearn_rocs[i][1], label=f"seed_{seeds[i]} ({round(aucs[i],3)}, {round(score_list[i],3)})")

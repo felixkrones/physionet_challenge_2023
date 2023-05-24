@@ -1,8 +1,10 @@
-Challenge Score: 0.230
-Outcome AUROC TNR_TPR: 0.692
-Sklearn AUROC TPR_FPR: 0.692
-Outcome AUPRC PPV_TPR: 0.760
-Outcome Accuracy: 0.661
-Outcome F-measure: 0.624
-CPC MSE: 3.070
-CPC MAE: 1.500
+Challenge Score: 0.324
+Outcome AUROC TNR_TPR: 0.729
+Sklearn AUROC TPR_FPR: 0.729
+Outcome AUPRC PPV_TPR: 0.823
+Outcome Accuracy: 0.702
+Outcome F-measure: 0.655
+CPC MSE: 2.867
+CPC MAE: 1.415
+Subgroup scores: {'Female (n=36)': 0.46153846153846156, 'Male (n=85)': 0.22916666666666666}
+Subgroup auc: {'Female (n=36)': 0.7923076923076924, 'Male (n=85)': 0.6956644144144144}
