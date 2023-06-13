@@ -16,13 +16,6 @@ module load Anaconda3
 source activate /data/inet-multimodal-ai/wolf6245/envs/physionet
 conda info --env
 
-# Tests
-#experiment_name=test
-#seed=test
-#python train_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/test_${seed}/" "data/02_models/${experiment_name}/seed_${seed}/"
-#python run_model.py "data/02_models/${experiment_name}/seed_${seed}/" "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/test_${seed}/" "data/03_model_output/${experiment_name}/seed_${seed}/"
-#python evaluate_model.py "/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/test_${seed}/" "data/03_model_output/${experiment_name}/seed_${seed}/" "data/04_reportings/${experiment_name}/seed_${seed}_results.csv"
-
 
 # Define and run experiment
 experiment_name=imagenet_allsignals_02_test_03_randvali_10e_rf_v1

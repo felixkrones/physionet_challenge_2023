@@ -13,23 +13,55 @@
 # described on the Challenge webpage.
 
 import os, os.path, sys, numpy as np
-from sklearn.metrics import roc_auc_score, roc_curve
+from sklearn.metrics import roc_auc_score, roc_curve, confusion_matrix
 import matplotlib.pyplot as plt
 
 from helper_code import *
 
 # Evaluate the models.
 def evaluate_model(label_folder, output_folder):
-    # Load labels and model outputs.
-    patient_ids, label_outcomes, label_cpcs = load_challenge_labels(label_folder)
-    output_outcomes, output_outcome_probabilities, output_cpcs = load_challenge_outputs(output_folder, patient_ids)
+    # Load the labels.
+    patient_ids = find_data_folders(label_folder)
+    num_patients = len(patient_ids)
+
+    hospitals = list()
+    label_outcomes = list()
+    label_cpcs = list()
+
+    for i in range(num_patients):
+        patient_data_file = os.path.join(label_folder, patient_ids[i], patient_ids[i] + '.txt')
+        patient_data = load_text_file(patient_data_file)
+
+        hospital = get_hospital(patient_data)
+        label_outcome = get_outcome(patient_data)
+        label_cpc = get_cpc(patient_data)
+
+        hospitals.append(hospital)
+        label_outcomes.append(label_outcome)
+        label_cpcs.append(label_cpc)
+
+    # Load the model outputs.
+    output_outcomes = list()
+    output_outcome_probabilities = list()
+    output_cpcs = list()
+
+    for i in range(num_patients):
+        output_file = os.path.join(output_folder, patient_ids[i], patient_ids[i] + '.txt')
+        output_data = load_text_file(output_file)
+
+        output_outcome = get_outcome(output_data)
+        output_outcome_probability = get_outcome_probability(output_data)
+        output_cpc = get_cpc(output_data)
+
+        output_outcomes.append(output_outcome)
+        output_outcome_probabilities.append(output_outcome_probability)
+        output_cpcs.append(output_cpc)
 
     # Evaluate the models.
-    challenge_score = compute_challenge_score(label_outcomes, output_outcome_probabilities)
+    challenge_score = compute_challenge_score(label_outcomes, output_outcome_probabilities, hospitals)
     auroc_outcomes, auprc_outcomes, sklearn_auc, sklearn_roc = compute_auc(label_outcomes, output_outcome_probabilities)
     accuracy_outcomes, _, _ = compute_accuracy(label_outcomes, output_outcomes)
     f_measure_outcomes, _, _ = compute_f_measure(label_outcomes, output_outcomes)
-
     mse_cpcs = compute_mse(label_cpcs, output_cpcs)
     mae_cpcs = compute_mae(label_cpcs, output_cpcs)
 
@@ -53,71 +85,108 @@ def evaluate_model(label_folder, output_folder):
             idx = np.where(np.array(sex_list)==s)[0]
             l_f = np.array([label_outcomes[i] for i in idx])
             o_f = np.array([output_outcome_probabilities[i] for i in idx])
-            subgroup_scores[f"{s} (n={n})"] = compute_challenge_score(l_f, o_f)
+            h_f = np.array([hospitals[i] for i in idx])
+            subgroup_scores[f"{s} (n={n})"] = compute_challenge_score(l_f, o_f, h_f)
             subgroup_aucs[f"{s} (n={n})"] = compute_auc(l_f, o_f)[0]
 
     # Return the results.
-    return challenge_score, auroc_outcomes, auprc_outcomes, accuracy_outcomes, f_measure_outcomes, mse_cpcs, mae_cpcs, sklearn_auc, sklearn_roc, subgroup_scores, subgroup_aucs
+    return challenge_score, auroc_outcomes, auprc_outcomes, accuracy_outcomes, f_measure_outcomes, mse_cpcs, mae_cpcs, sklearn_auc, sklearn_roc, subgroup_scores, subgroup_aucs, label_outcomes, output_outcome_probabilities
 
 
 # Compute the Challenge score.
-def compute_challenge_score(labels, outputs):
+def compute_challenge_score(labels, outputs, hospitals):
+    # Check the data.
     assert len(labels) == len(outputs)
-    num_instances = len(labels)
 
-    # Use the unique output values as the thresholds for the positive and negative classes.
-    thresholds = np.unique(outputs)
-    thresholds = np.append(thresholds, thresholds[-1]+1)
-    thresholds = thresholds[::-1]
-    num_thresholds = len(thresholds)
+    # Convert the data to NumPy arrays for easier indexing.
+    labels = np.asarray(labels, dtype=np.float64)
+    outputs = np.asarray(outputs, dtype=np.float64)
 
-    idx = np.argsort(outputs)[::-1]
+    # Identify the unique hospitals.
+    unique_hospitals = sorted(set(hospitals))
+    num_hospitals = len(unique_hospitals)
 
-    # Initialize the TPs, FPs, FNs, and TNs with no positive outputs.
-    tp = np.zeros(num_thresholds)
-    fp = np.zeros(num_thresholds)
-    fn = np.zeros(num_thresholds)
-    tn = np.zeros(num_thresholds)
+    # Initialize a confusion matrix for each hospital.
+    tps = np.zeros(num_hospitals)
+    fps = np.zeros(num_hospitals)
+    fns = np.zeros(num_hospitals)
+    tns = np.zeros(num_hospitals)
 
-    tp[0] = 0
-    fp[0] = 0
-    fn[0] = np.sum(labels == 1)
-    tn[0] = np.sum(labels == 0)
+    # Compute the confusion matrix at each output threshold separately for each hospital.
+    for i, hospital in enumerate(unique_hospitals):
+        idx = [j for j, x in enumerate(hospitals) if x == hospital]
+        current_labels = labels[idx]
+        current_outputs = outputs[idx]
+        num_instances = len(current_labels)
 
-    # Update the TPs, FPs, FNs, and TNs using the values at the previous threshold.
-    i = 0
-    for j in range(1, num_thresholds):
-        tp[j] = tp[j-1]
-        fp[j] = fp[j-1]
-        fn[j] = fn[j-1]
-        tn[j] = tn[j-1]
+        # Collect the unique output values as the thresholds for the positive and negative classes.
+        thresholds = np.unique(current_outputs)
+        thresholds = np.append(thresholds, thresholds[-1]+1)
+        thresholds = thresholds[::-1]
+        num_thresholds = len(thresholds)
 
-        while i < num_instances and outputs[idx[i]] >= thresholds[j]:
-            if labels[idx[i]]:
-                tp[j] += 1
-                fn[j] -= 1
+        idx = np.argsort(current_outputs)[::-1]
+
+        # Initialize the TPs, FPs, FNs, and TNs with no positive outputs.
+        tp = np.zeros(num_thresholds)
+        fp = np.zeros(num_thresholds)
+        fn = np.zeros(num_thresholds)
+        tn = np.zeros(num_thresholds)
+
+        tp[0] = 0
+        fp[0] = 0
+        fn[0] = np.sum(current_labels == 1)
+        tn[0] = np.sum(current_labels == 0)
+
+        # Update the TPs, FPs, FNs, and TNs using the values at the previous threshold.
+        k = 0
+        for l in range(1, num_thresholds):
+            tp[l] = tp[l-1]
+            fp[l] = fp[l-1]
+            fn[l] = fn[l-1]
+            tn[l] = tn[l-1]
+
+            while k < num_instances and current_outputs[idx[k]] >= thresholds[l]:
+                if current_labels[idx[k]] == 1:
+                    tp[l] += 1
+                    fn[l] -= 1
+                else:
+                    fp[l] += 1
+                    tn[l] -= 1
+                k += 1
+
+            # Compute the FPRs.
+            fpr = np.zeros(num_thresholds)
+            for l in range(num_thresholds):
+                if tp[l] + fn[l] > 0:
+                    fpr[l] = float(fp[l]) / float(tp[l] + fn[l])
+                else:
+                    fpr[l] = float('nan')
+
+            # Find the threshold such that FPR <= 0.05.
+            max_fpr = 0.05
+            if np.any(fpr <= max_fpr):
+                l = max(l for l, x in enumerate(fpr) if x <= max_fpr)
+                tps[i] = tp[l]
+                fps[i] = fp[l]
+                fns[i] = fn[l]
+                tns[i] = tn[l]
             else:
-                fp[j] += 1
-                tn[j] -= 1
-            i += 1
+                tps[i] = tp[0]
+                fps[i] = fp[0]
+                fns[i] = fn[0]
+                tns[i] = tn[0]
 
-    # Compute the TPRs and FPRs.
-    tpr = np.zeros(num_thresholds)
-    fpr = np.zeros(num_thresholds)
-    for j in range(num_thresholds):
-        if tp[j] + fn[j] > 0:
-            tpr[j] = float(tp[j]) / float(tp[j] + fn[j])
-            fpr[j] = float(fp[j]) / float(fp[j] + tn[j])
-        else:
-            tpr[j] = float('nan')
-            fpr[j] = float('nan')
+    # Compute the TPR at FPR <= 0.05 for each hospital.
+    tp = np.sum(tps)
+    fp = np.sum(fps)
+    fn = np.sum(fns)
+    tn = np.sum(tns)
 
-    # Find the largest TPR such that FPR <= 0.05.
-    max_fpr = 0.05
-    max_tpr = float('nan')
-    if np.any(fpr <= max_fpr):
-        indices = np.where(fpr <= max_fpr)
-        max_tpr = np.max(tpr[indices])
+    if tp + fn > 0:
+        max_tpr = tp / (tp + fn)
+    else:
+        max_tpr = float('nan')
 
     return max_tpr
 
@@ -126,7 +195,11 @@ def compute_auc(labels, outputs):
     assert len(labels) == len(outputs)
     num_instances = len(labels)
 
-    # Use the unique output values as the thresholds for the positive and negative classes.
+    # Convert the data to NumPy arrays for easier indexing.
+    labels = np.asarray(labels, dtype=np.float64)
+    outputs = np.asarray(outputs, dtype=np.float64)
+
+    # Collect the unique output values as the thresholds for the positive and negative classes.
     thresholds = np.unique(outputs)
     thresholds = np.append(thresholds, thresholds[-1]+1)
     thresholds = thresholds[::-1]
@@ -154,7 +227,7 @@ def compute_auc(labels, outputs):
         tn[j] = tn[j-1]
 
         while i < num_instances and outputs[idx[i]] >= thresholds[j]:
-            if labels[idx[i]]:
+            if labels[idx[i]] == 1:
                 tp[j] += 1
                 fn[j] -= 1
             else:
@@ -167,16 +240,16 @@ def compute_auc(labels, outputs):
     tnr = np.zeros(num_thresholds)
     ppv = np.zeros(num_thresholds)
     for j in range(num_thresholds):
-        if tp[j] + fn[j]:
-            tpr[j] = float(tp[j]) / float(tp[j] + fn[j])
+        if tp[j] + fn[j] > 0:
+            tpr[j] = tp[j] / (tp[j] + fn[j])
         else:
             tpr[j] = float('nan')
-        if fp[j] + tn[j]:
-            tnr[j] = float(tn[j]) / float(fp[j] + tn[j])
+        if fp[j] + tn[j] > 0:
+            tnr[j] = tn[j] / (fp[j] + tn[j])
         else:
             tnr[j] = float('nan')
-        if tp[j] + fp[j]:
-            ppv[j] = float(tp[j]) / float(tp[j] + fp[j])
+        if tp[j] + fp[j] > 0:
+            ppv[j] = tp[j] / (tp[j] + fp[j])
         else:
             ppv[j] = float('nan')
 
@@ -315,32 +388,67 @@ def compute_mae(labels, outputs):
 
     return mae
 
-if __name__ == '__main__':
-    print("------------- evaluate_model.py -------------")
-    fontsize = 12
-
-    # Compute the scores for the model outputs.
-    scores = evaluate_model(sys.argv[1], sys.argv[2])
-
-    # Unpack the scores.
-    challenge_score, auroc_outcomes, auprc_outcomes, accuracy_outcomes, f_measure_outcomes, mse_cpcs, mae_cpcs, sklearn_auc, sklearn_roc, subgroup_scores, subgroup_aucs = scores
-
-    # Construct a string with scores.
-    output_string = \
-        'Challenge Score: {:.3f}\n'.format(challenge_score) + \
-        'Outcome AUROC TNR_TPR: {:.3f}\n'.format(auroc_outcomes) + \
-        'Sklearn AUROC TPR_FPR: {:.3f}\n'.format(sklearn_auc) + \
-        'Outcome AUPRC PPV_TPR: {:.3f}\n'.format(auprc_outcomes) + \
-        'Outcome Accuracy: {:.3f}\n'.format(accuracy_outcomes) + \
-        'Outcome F-measure: {:.3f}\n'.format(f_measure_outcomes) + \
-        'CPC MSE: {:.3f}\n'.format(mse_cpcs) + \
-        'CPC MAE: {:.3f}\n'.format(mae_cpcs) + \
-        f'Subgroup scores: {subgroup_scores}\n' + \
-        f'Subgroup auc: {subgroup_aucs}'
+# Plot the decision threshold curve.
+def decision_threshold_plot(true_labels, prediction_probabilities, output_directory):
+    """
+    Plot the decision threshold curve.
+    """
     
+    # Initiate
+    thresholds = np.linspace(0, 1, 100)
+    accuracy_list = []
+    fpr_list = []  # false positive rate
+    fnr_list = []  # false negative rate
+
+    # Calculate metrics for each threshold
+    for threshold in thresholds:
+        tn, fp, fn, tp = confusion_matrix(true_labels, prediction_probabilities).ravel()
+        accuracy = (tp + tn) / (tp + tn + fp + fn)
+        fpr = fp / (fp + tn)  # false positive rate
+        fnr = fn / (fn + tp)  # false negative rate
+        accuracy_list.append(accuracy)
+        fpr_list.append(fpr*-1)
+        fnr_list.append(fnr*-1)
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+
+     # Generate the plot
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+
+    color = 'tab:blue'
+    ax1.set_xlabel('Decision Threshold', fontsize=14)
+    ax1.set_ylabel('Accuracy', color=color, fontsize=14)
+    ax1.plot(thresholds, accuracy_list, color='tab:blue', label='Accuracy')
+    ax1.tick_params(axis='y', labelcolor=color, labelsize=12)
+    ax1.tick_params(axis='x', labelsize=12)
+
+    ax2 = ax1.twinx()
+    color = 'tab:red'
+    ax2.set_ylabel('- False Positive Rate / - False Negative Rate', color=color, fontsize=14)
+    ax2.plot(thresholds, fpr_list, color='tab:red', label='- False Positive Rate (FP / (FP + TN))')
+    ax2.plot(thresholds, fnr_list, color='tab:orange', label='- False Negative Rate (FN / (FN + TP))')
+    ax2.tick_params(axis='y', labelcolor=color, labelsize=12)
+
+    fig.tight_layout()
+    plt.subplots_adjust(top=0.9)  # Adjust top margin
+    plt.title('Metrics for different decision thresholds for the positive finding class', fontsize=16, pad=20)
+    fig.legend(loc="center right", bbox_to_anchor=(0.95,0.5), bbox_transform=ax1.transAxes, fontsize=12)
+    plt.grid(True)
+
+    # Save the plots
+    if not os.path.exists(output_directory):
+        os.makedirs(output_directory)
+    plot_path_png = os.path.join(output_directory, "threshold_plot.png")
+    plt.savefig(plot_path_png)
+    plot_path_pdf = os.path.join(output_directory, "threshold_plot.pdf")
+    plt.savefig(plot_path_pdf)
+
+    # Close the figure
+    plt.close()
+
+# Plot the ROC curve.
+def plot_auc_curves(sklearn_roc, auroc_outcomes, challenge_score, roc_path, output_string, fontsize=12):
     # Plot the ROC curve from sklearn_roc and save it to a file.
     seed = sys.argv[3].split("seed_")[-1].split("_")[0]
-    roc_path = f'{"/".join(sys.argv[3].split("/")[:-1])}/'
     if not os.path.exists(roc_path):
         os.makedirs(roc_path, exist_ok=True)
     plt.figure()
@@ -390,3 +498,29 @@ if __name__ == '__main__':
         plt.yticks(fontsize=fontsize*1.4)
         plt.legend(fontsize=fontsize*1.4)
         plt.savefig(save_path_all_roc)
+    
+
+if __name__ == '__main__':
+    print("------------- evaluate_model.py -------------")
+
+    # Compute the scores for the model outputs.
+    challenge_score, auroc_outcomes, auprc_outcomes, accuracy_outcomes, f_measure_outcomes, mse_cpcs, mae_cpcs, sklearn_auc, sklearn_roc, subgroup_scores, subgroup_aucs, label_outcomes, output_outcome_probabilities = evaluate_model(sys.argv[1], sys.argv[2])
+
+    # Construct a string with scores.
+    output_string = \
+        'Challenge Score: {:.3f}\n'.format(challenge_score) + \
+        'Outcome AUROC TNR_TPR: {:.3f}\n'.format(auroc_outcomes) + \
+        'Sklearn AUROC TPR_FPR: {:.3f}\n'.format(sklearn_auc) + \
+        'Outcome AUPRC PPV_TPR: {:.3f}\n'.format(auprc_outcomes) + \
+        'Outcome Accuracy: {:.3f}\n'.format(accuracy_outcomes) + \
+        'Outcome F-measure: {:.3f}\n'.format(f_measure_outcomes) + \
+        'CPC MSE: {:.3f}\n'.format(mse_cpcs) + \
+        'CPC MAE: {:.3f}\n'.format(mae_cpcs) + \
+        f'Subgroup scores: {subgroup_scores}\n' + \
+        f'Subgroup auc: {subgroup_aucs}'
+
+    # Plot the ROC curve.
+    plot_auc_curves(sklearn_roc, auroc_outcomes, challenge_score, f'{"/".join(sys.argv[3].split("/")[:-1])}/', output_string, fontsize=12)
+
+    # Plot decision threshold curve
+    decision_threshold_plot(true_labels=label_outcomes, prediction_probabilities=output_outcome_probabilities, output_directory=f'{"/".join(sys.argv[3].split("/")[:-1])}/')
