@@ -12,6 +12,7 @@ This code uses four main scripts, described below, to train and run a model for 
 
 The [Challenge website](https://physionetchallenges.org/2023/#data) provides a training database with a description of the contents and structure of the data files.
 
+
 ## What we did
 - Log mel spectrograms using librosa package
 - Flags for missing signals and prob of 0 for missing signals to be safe
@@ -46,12 +47,15 @@ If instead using conda
    /path/to/anaconda/envs/env_name/bin/pip install -r requirements.txt
    ```
 
-
 ### 1. Data
 
 Download the challenge data:
 1. Create and jump into data folder: `cd a_data && mkdir 00_raw && cd 00_raw`
-2. Download: `wget -r -N -c -np https://physionet.org/files/i-care/1.0/`
+2. Download all data: `wget -r -N -c -np https://physionet.org/files/i-care/2.0/`
+3. Only download data up to 72 hours:
+    1. First all txt files: `wget -r -N -c -np -A "*.txt" -q "https://physionet.org/files/i-care/2.0/"`
+    2. Then all EEG data: `for ((i=0; i<=72; i++)); do echo "Starting i: $i"; j=$(printf "%03d" $i); wget -r -N -c -np -A "*_${j}_EEG.*" -q "https://physionet.org/files/i-care/2.0/"; echo "Finished i: $i, with j: $j"; done`
+    3. Then all ECG data: `for ((i=0; i<=72; i++)); do echo "Starting i: $i"; j=$(printf "%03d" $i); wget -r -N -c -np -A "*_${j}_ECG.*" -q "https://physionet.org/files/i-care/2.0/"; echo "Finished i: $i, with j: $j"; done`
 
 
 ### 2. Split data

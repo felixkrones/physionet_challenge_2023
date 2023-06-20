@@ -171,8 +171,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
         print("Start predicting ECG torch features ...")
         output_list_ecg, patient_id_list_ecg, hour_list_ecg, quality_list_ecg = torch_prediction(torch_model_ecg, data_loader_ecg, device)
         print("Done with ECG torch.")
+
+        print("Done with torch")
         
-    print("Done with torch, now calculating features...")
+    print("Calculating features...")
     features = list()
     feature_names = list()
     outcomes = list()
@@ -236,7 +238,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     cpc_model.fit(features, cpcs.ravel())
     
     # Save the models.
-    save_challenge_model(model_folder, imputer, outcome_model, cpc_model, torch_model_eeg, torch_model_ecg)
+    save_challenge_model(model_folder, imputer, outcome_model, cpc_model, torch_model_eeg=torch_model_eeg, torch_model_ecg=torch_model_ecg)
 
     # Plot and save feature importance
     feature_importance = outcome_model.feature_importances_
@@ -489,14 +491,20 @@ def preprocess_data(data, sampling_frequency, utility_frequency):
     return data, resampling_frequency
 
 # Load recording data. #TODO: All use all recordings
-def get_recording_features(recording_ids, recording_id_to_use, dummy_channels, data_folder, patient_id, group, channels_to_use):
+def get_recording_features(recording_ids, recording_id_to_use, data_folder, patient_id, group, channels_to_use):
+    if group == "EEG":
+        dummy_channels = 8
+    elif group == "ECG":
+        dummy_channels = 10
+    else:
+        raise ValueError("Group should be either ECG or EEG")
     if len(recording_ids) > 0:
         recording_id = recording_ids[recording_id_to_use]
         recording_location = os.path.join(data_folder, patient_id, '{}_{}'.format(recording_id, group))
         if os.path.exists(recording_location + '.hea'):
             data, channels, sampling_frequency = load_recording_data(recording_location)
             utility_frequency = get_utility_frequency(recording_location + '.hea')
-            if all(channel in channels for channel in channels_to_use):
+            if all(channel in channels for channel in channels_to_use) or group == "ECG":
                 data, channels = reduce_channels(data, channels, channels_to_use)
                 data, sampling_frequency = preprocess_data(data, sampling_frequency, utility_frequency)
                 if group == "EEG":
@@ -504,11 +512,25 @@ def get_recording_features(recording_ids, recording_id_to_use, dummy_channels, d
                         data = np.array([data[channels.index(montage[0]), :] - data[channels.index(montage[1]), :] for montage in BIPOLAR_MONTAGES])
                     recording_features, recording_feature_names = get_eeg_features(data, sampling_frequency)
                 elif group == "ECG":
-                    features, recording_feature_names = get_ecg_features(data)
+                    features, recording_feature_names_aux = get_ecg_features(data)
                     recording_features = expand_channels(features, channels, channels_to_use).flatten()
+                    if channels == channels_to_use:
+                        recording_feature_names = recording_feature_names_aux.flatten()
+                    else:
+                        num_current_channels, num_samples = np.shape(recording_feature_names_aux)
+                        num_requested_channels = len(channels_to_use)
+                        recording_feature_names = np.empty((num_requested_channels, num_samples), "S15")
+                        for i, channel in enumerate(channels_to_use):
+                            if channel in channels:
+                                j = channels.index(channel)
+                                recording_feature_names[i, :] = [f"{n}_{i}" for n in recording_feature_names_aux[j, :]]
+                            else:
+                                recording_feature_names[i, :] = f'ECG_nan_{i}'
+                        recording_feature_names = recording_feature_names.flatten()
                 else:
                     raise NotImplementedError(f"Group {group} not implemented.")
             else:
+                print(f"For patient {patient_id} recording {recording_id} the channels {channels_to_use} are not all available.")
                 recording_features = float('nan') * np.ones(dummy_channels) # 2 bipolar channels * 4 features / channel
                 recording_feature_names = [f'{group}_nan_{i}' for i in range(dummy_channels)]
         else:
@@ -533,14 +555,14 @@ def get_features(data_folder, patient_id, return_as_dict=False):
     patient_features, patient_feature_names = get_patient_features(patient_metadata)
 
     # Extract EEG features.
-    eeg_features, eeg_feature_names = get_recording_features(recording_ids=recording_ids, recording_id_to_use=-1, dummy_channels=8, data_folder=data_folder, patient_id=patient_id, group="EEG", channels_to_use=EEG_CHANNELS)
+    eeg_features, eeg_feature_names = get_recording_features(recording_ids=recording_ids, recording_id_to_use=-1, data_folder=data_folder, patient_id=patient_id, group="EEG", channels_to_use=EEG_CHANNELS)
 
     # Extract ECG features.
-    ecg_features, ecg_feature_names = get_recording_features(recording_ids=recording_ids, recording_id_to_use=0, dummy_channels=10, data_folder=data_folder, patient_id=patient_id, group="ECG", channels_to_use=ECG_CHANNELS)
+    ecg_features, ecg_feature_names = get_recording_features(recording_ids=recording_ids, recording_id_to_use=0, data_folder=data_folder, patient_id=patient_id, group="ECG", channels_to_use=ECG_CHANNELS)
 
     # Extract features.
     feature_values = np.hstack((patient_features, eeg_features, ecg_features))
-    feature_names = patient_feature_names + eeg_feature_names + ecg_feature_names
+    feature_names = np.hstack((patient_feature_names, eeg_feature_names, ecg_feature_names))
 
     if return_as_dict:
         return {k: v for k, v in zip(feature_names, feature_values)}
@@ -591,10 +613,9 @@ def get_eeg_features(data, sampling_frequency):
         beta_psd_mean  = np.nanmean(beta_psd,  axis=1)
     else:
         delta_psd_mean = theta_psd_mean = alpha_psd_mean = beta_psd_mean = float('nan') * np.ones(num_channels)
-
     features = np.array((delta_psd_mean, theta_psd_mean, alpha_psd_mean, beta_psd_mean)).T
     features = features.flatten()
-    feature_names = ["delta_psd_mean", "theta_psd_mean", "alpha_psd_mean", "beta_psd_mean"]
+    feature_names = np.array((np.array([f"delta_psd_mean_{i}" for i in range(data.shape[0])]), np.array([f"theta_psd_mean_{i}" for i in range(data.shape[0])]), np.array([f"alpha_psd_mean_{i}" for i in range(data.shape[0])]), np.array([f"beta_psd_mean_{i}" for i in range(data.shape[0])]))).T.flatten()
 
     return features, feature_names
 
@@ -613,7 +634,7 @@ def get_ecg_features(data):
         std = float('nan') * np.ones(num_channels)
 
     features = np.array((mean, std)).T
-    feature_names = ["mean", "std"]
+    feature_names = np.array((np.array([f"ECG_mean_{i}" for i in range(data.shape[0])]), np.array([f"ECG_std_{i}" for i in range(data.shape[0])]))).T
 
     return features, feature_names
 

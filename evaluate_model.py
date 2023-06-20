@@ -66,28 +66,28 @@ def evaluate_model(label_folder, output_folder):
     mae_cpcs = compute_mae(label_cpcs, output_cpcs)
 
     # Subgroup evaluation
-    sex_list = list()
-    num_patients = len(patient_ids)
-    for i in range(num_patients):
-        string = os.path.join(label_folder, patient_ids[i], patient_ids[i] + '.txt')
-        if os.path.isfile(string):
-            patient_metadata = load_text_file(string)
-        else:
-            raise ValueError(f"No such file {string}")
-        sex = get_sex(patient_metadata)
-        sex_list.append(sex)
-    unique_sex = np.unique([sex for sex in sex_list if sex is not None])
+    #sex_list = list()
+    #num_patients = len(patient_ids)
+    #for i in range(num_patients):
+    #    string = os.path.join(label_folder, patient_ids[i], patient_ids[i] + '.txt')
+    #    if os.path.isfile(string):
+    #        patient_metadata = load_text_file(string)
+    #    else:
+    #        raise ValueError(f"No such file {string}")
+    #    sex = get_sex(patient_metadata)
+    #    sex_list.append(sex)
+    #unique_sex = np.unique([sex for sex in sex_list if sex is not None])
     subgroup_scores = dict()
     subgroup_aucs = dict()
-    for s in unique_sex:
-        if s != "nan":
-            n = len(np.where(np.array(sex_list)==s)[0])
-            idx = np.where(np.array(sex_list)==s)[0]
-            l_f = np.array([label_outcomes[i] for i in idx])
-            o_f = np.array([output_outcome_probabilities[i] for i in idx])
-            h_f = np.array([hospitals[i] for i in idx])
-            subgroup_scores[f"{s} (n={n})"] = compute_challenge_score(l_f, o_f, h_f)
-            subgroup_aucs[f"{s} (n={n})"] = compute_auc(l_f, o_f)[0]
+    #for s in unique_sex:
+    #    if s != "nan":
+    #        n = len(np.where(np.array(sex_list)==s)[0])
+    #        idx = np.where(np.array(sex_list)==s)[0]
+    #        l_f = np.array([label_outcomes[i] for i in idx])
+    #        o_f = np.array([output_outcome_probabilities[i] for i in idx])
+    #        h_f = np.array([hospitals[i] for i in idx])
+    #        subgroup_scores[f"{s} (n={n})"] = compute_challenge_score(l_f, o_f, h_f)
+    #        subgroup_aucs[f"{s} (n={n})"] = compute_auc(l_f, o_f)[0]
 
     # Return the results.
     return challenge_score, auroc_outcomes, auprc_outcomes, accuracy_outcomes, f_measure_outcomes, mse_cpcs, mae_cpcs, sklearn_auc, sklearn_roc, subgroup_scores, subgroup_aucs, label_outcomes, output_outcome_probabilities
@@ -402,7 +402,8 @@ def decision_threshold_plot(true_labels, prediction_probabilities, output_direct
 
     # Calculate metrics for each threshold
     for threshold in thresholds:
-        tn, fp, fn, tp = confusion_matrix(true_labels, prediction_probabilities).ravel()
+        predictions = np.where(prediction_probabilities > threshold, 1, 0)
+        tn, fp, fn, tp = confusion_matrix(true_labels, predictions).ravel()
         accuracy = (tp + tn) / (tp + tn + fp + fn)
         fpr = fp / (fp + tn)  # false positive rate
         fnr = fn / (fn + tp)  # false negative rate
@@ -459,7 +460,7 @@ def plot_auc_curves(sklearn_roc, auroc_outcomes, challenge_score, roc_path, outp
     plt.title(f'ROC Curve (seed {seed}), AUC = {round(auroc_outcomes,3)}, score = {round(challenge_score,3)}', fontsize=fontsize*1.2)
     plt.xticks(fontsize=fontsize*0.9)
     plt.yticks(fontsize=fontsize*0.9)
-    plt.savefig(f'{roc_path}/seed_{seed}_roc_curve.png')
+    plt.savefig(f'{roc_path}seed_{seed}_roc_curve.png')
 
     # Output the scores to screen and/or a file.
     if len(sys.argv) == 3:
