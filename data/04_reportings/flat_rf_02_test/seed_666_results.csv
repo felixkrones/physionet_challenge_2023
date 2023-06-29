@@ -1,8 +1,0 @@
-Challenge Score: 0.432
-Outcome AUROC TNR_TPR: 0.835
-Sklearn AUROC TPR_FPR: 0.835
-Outcome AUPRC PPV_TPR: 0.903
-Outcome Accuracy: 0.793
-Outcome F-measure: 0.762
-CPC MSE: 2.155
-CPC MAE: 1.278

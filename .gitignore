@@ -6,6 +6,7 @@
 lightning_logs/*
 data/02_models/*
 data/03_model_output/*
+data/04_reportings/*
 Pipfile.lock
 Pipfile
 *.pth

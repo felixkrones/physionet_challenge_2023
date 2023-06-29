@@ -37,7 +37,7 @@ def find_recording_files(data_folder, patient_id):
     return sorted(record_names)
 
 # Load the WFDB data for the Challenge (but not all possible WFDB files).
-def load_recording_data(record_name):
+def load_recording_data(record_name, check_values=True):
     # Allow either the record name or the header filename.
     root, ext = os.path.splitext(record_name)
     if ext=='':
@@ -47,7 +47,7 @@ def load_recording_data(record_name):
 
     # Load the header file.
     if not os.path.isfile(header_file):
-        raise FileNotFoundError('{} recording not found.'.format(record_name))
+        raise FileNotFoundError(f'{record_name} recording not found since {header_file} does bit exist.')
 
     with open(header_file, 'r') as f:
         header = [l.strip() for l in f.readlines() if l.strip()]
@@ -97,7 +97,12 @@ def load_recording_data(record_name):
     # Load the signal file.
     head, tail = os.path.split(header_file)
     signal_file = os.path.join(head, list(signal_files)[0])
-    data = np.asarray(sp.io.loadmat(signal_file)['val'])
+    try:
+        data = np.asarray(sp.io.loadmat(signal_file)['val'])
+    except Exception as e:
+        print(f"Failed for file {signal_file}")
+        print(f"Original Error: {e}")
+        raise
 
     # Check that the dimensions of the signal data in the signal file is consistent with the dimensions for the signal data given
     # in the header file.
@@ -106,15 +111,16 @@ def load_recording_data(record_name):
         raise ValueError('The header file {}'.format(header_file) \
             + ' is inconsistent with the dimensions of the signal file.')
 
-    # Check that the initial value and checksums for the signal data in the signal file are consistent with the initial value and
-    # checksums for the signal data given in the header file.
-    for i in range(num_channels):
-        if data[i, 0]!=initial_values[i]:
-            raise ValueError('The initial value in header file {}'.format(header_file) \
-                + ' is inconsistent with the initial value for channel'.format(channels[i]))
-        if np.sum(data[i, :])!=checksums[i]:
-            raise ValueError('The checksum in header file {}'.format(header_file) \
-                + ' is inconsistent with the initial value for channel'.format(channels[i]))
+    # Check that the initial value and checksums in the signal file are consistent with the initial value and checksums in the
+    # header file.
+    if check_values:
+        for i in range(num_channels):
+            if data[i, 0]!=initial_values[i]:
+                raise ValueError('The initial value in header file {}'.format(header_file) \
+                    + ' is inconsistent with the initial value for channel {} in the signal data'.format(channels[i]))
+            if np.sum(data[i, :])!=checksums[i]:
+                raise ValueError('The checksum in header file {}'.format(header_file) \
+                    + ' is inconsistent with the checksum value for channel {} in the signal data'.format(channels[i]))
 
     # Rescale the signal data using the gains and offsets.
     rescaled_data = np.zeros(np.shape(data), dtype=np.float32)

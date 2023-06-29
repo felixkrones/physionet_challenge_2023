@@ -47,22 +47,30 @@ If instead using conda
    /path/to/anaconda/envs/env_name/bin/pip install -r requirements.txt
    ```
 
+
 ### 1. Data
+
+If you download from Google Cloud, first install gsutil:
+https://cloud.google.com/storage/docs/gsutil_install
 
 Download the challenge data:
 1. Create and jump into data folder: `cd a_data && mkdir 00_raw && cd 00_raw`
-2. Download all data: `wget -r -N -c -np https://physionet.org/files/i-care/2.0/`
-3. Only download data up to 72 hours:
-    1. First all txt files: `wget -r -N -c -np -A "*.txt" -q "https://physionet.org/files/i-care/2.0/"`
-    2. Then all EEG data: `for ((i=0; i<=72; i++)); do echo "Starting i: $i"; j=$(printf "%03d" $i); wget -r -N -c -np -A "*_${j}_EEG.*" -q "https://physionet.org/files/i-care/2.0/"; echo "Finished i: $i, with j: $j"; done`
-    3. Then all ECG data: `for ((i=0; i<=72; i++)); do echo "Starting i: $i"; j=$(printf "%03d" $i); wget -r -N -c -np -A "*_${j}_ECG.*" -q "https://physionet.org/files/i-care/2.0/"; echo "Finished i: $i, with j: $j"; done`
+2. Download: 
+    - All data: `wget -r -N -c -np https://physionet.org/files/i-care/2.0/` or via gsutil (much faster): `gsutil -m cp -r -n "gs://i-care-2.0.physionet.org/training" .`
+    - Only download data up to 72 hours:
+        - First all txt files: `wget -r -N -c -np -A "*.txt" -q "https://physionet.org/files/i-care/2.0/"`
+        - Then all EEG data: `for ((i=0; i<=72; i++)); do echo "Starting i: $i"; j=$(printf "%03d" $i); wget -r -N -c -np -A "*_${j}_EEG.*" -q "https://physionet.org/files/i-care/2.0/"; echo "Finished i: $i, with j: $j"; done` or with gsutil: `for ((i=0; i<=72; i++)); do echo "Starting i: $i"; j=$(printf "%03d" $i); gsutil -m cp -r -n "gs://i-care-2.0.physionet.org/training/**/*_${j}_EEG.*" .; echo "Finished i: $i, with j: $j"; done`
+        - Then all ECG data: `for ((i=0; i<=72; i++)); do echo "Starting i: $i"; j=$(printf "%03d" $i); wget -r -N -c -np -A "*_${j}_ECG.*" -q "https://physionet.org/files/i-care/2.0/"; echo "Finished i: $i, with j: $j"; done` or with gsutil: `for ((i=0; i<=72; i++)); do echo "Starting i: $i"; j=$(printf "%03d" $i); gsutil -m cp -r -n "gs://i-care-2.0.physionet.org/training/**/*_${j}_ECG.*" .; echo "Finished i: $i, with j: $j"; done`
+        - Then all OTHER data: `for ((i=0; i<=72; i++)); do echo "Starting i: $i"; j=$(printf "%03d" $i); wget -r -N -c -np -A "*_${j}_OTHER.*" -q "https://physionet.org/files/i-care/2.0/"; echo "Finished i: $i, with j: $j"; done` or with gsutil: `for ((i=0; i<=72; i++)); do echo "Starting i: $i"; j=$(printf "%03d" $i); gsutil -m cp -r -n "gs://i-care-2.0.physionet.org/training/**/*_${j}_OTHER.*" .; echo "Finished i: $i, with j: $j"; done`
+        - Then all REF data: `for ((i=0; i<=72; i++)); do echo "Starting i: $i"; j=$(printf "%03d" $i); wget -r -N -c -np -A "*_${j}_REF.*" -q "https://physionet.org/files/i-care/2.0/"; echo "Finished i: $i, with j: $j"; done` or with gsutil: `for ((i=0; i<=72; i++)); do echo "Starting i: $i"; j=$(printf "%03d" $i); gsutil -m cp -r -n "gs://i-care-2.0.physionet.org/training/**/*_${j}_REF.*" .; echo "Finished i: $i, with j: $j"; done`
+3. If you used gsutil, you can use `sort_gsutil_files.py` to sort the files into physionet structure or `remove_hours.py` to remove certain hours
 
 
 ### 2. Split data
 
-Run the following script (first adjust the paramters and paths inside):
+- If you have enough space to store the data many times, run the following script (first adjust the paramters and paths inside): `split_data.py`
+- If not, you can run `move_test_files_out.py` and `move_test_files_back.py` before and after training and testing the scrips. They use 5-fold cv.
 
-    split_data.py
 
 ### 3. Train
 

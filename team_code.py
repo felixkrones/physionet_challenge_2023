@@ -27,6 +27,7 @@ from torch import nn
 from torch.utils.data.dataloader import default_collate
 import torchvision
 import torchvision.models as models
+import torchvision.transforms as T
 from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
 import pytorch_lightning as pl
@@ -37,13 +38,19 @@ import matplotlib.pyplot as plt
 import time
 
 
-ECG_CHANNELS = ['ECG', 'ECGL', 'ECGR', 'ECG1', 'ECG2']
-EEG_CHANNELS = ['F3', 'P3', 'F4', 'P4']
-BIPOLAR_MONTAGES = [('F3','P3'), ('F4','P4')] #TODO: Implement for torch as well
-USE_TORCH = False
-PARAMS_DEVICE = {"num_workers": 20} #os.cpu_count()}
+ECG_CHANNELS = ['ECG', 'ECGL', 'ECGR', 'ECG1', 'ECG2'] # ECG, ECG1, ECG2, ECGL, ECGR
+USE_ECG = False
+EEG_CHANNELS = ['Fp1', 'Fp2', 'F7', 'F8', 'F3', 'F4', 'T3', 'T4', 'C3', 'C4', 'T5', 'T6', 'P3', 'P4', 'O1', 'O2', 'Fz', 'Cz', 'Pz'] # ['F3', 'P3', 'F4', 'P4'] # ['Fp1', 'Fp2', 'F7', 'F8', 'F3', 'F4', 'T3', 'T4', 'C3', 'C4', 'T5', 'T6', 'P3', 'P4', 'O1', 'O2', 'Fz', 'Cz', 'Pz', 'Fpz', 'Oz', 'F9']
+BIPOLAR_MONTAGES = None # [('F3','P3'), ('F4','P4')]
+NUM_HOURS_EEG = -3
+NUM_HOURS_ECG = -3
+USE_TORCH = True #TODO: Combine ECG and EEG channels in one model # TODO: Fuse in torch model
+IMPUTE = True
+
+PARAMS_DEVICE = {"num_workers": 0} #os.cpu_count()}
 print(f"CPU count: {os.cpu_count()}")
 print(PARAMS_DEVICE)
+USE_GPU = True
 
 ################################################################################
 #
@@ -54,12 +61,20 @@ print(PARAMS_DEVICE)
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose):
     # Parameters
-    params_torch = {'batch_size': 16, 'val_size': 0.3, 'max_epochs': 10, 'pretrained': True, 'devices': 1, 'num_nodes': 1}
+    params_torch = {'batch_size': 16, 'val_size': 0.3, 'max_epochs': 30, 'pretrained': True, 'devices': 1, 'num_nodes': 1}
     c_model = "rf" # "xgb" or "rf
     params_rf = {'n_estimators': 123, 'max_depth': 8, 'max_leaf_nodes': None, 'random_state': 42, 'n_jobs': 8}
     params_xgb = {'max_depth': 8, 'eval_metric': 'auc', 'nthread': 8}
 
     if USE_TORCH:
+        # Get device
+        if USE_GPU:
+            device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+            accelerator = "gpu" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+        else:
+            device = "cpu"
+            accelerator = "cpu"
+        print(f"Using device {device} and accelerator {accelerator}")
         if c_model=="rf":
             print(f"Train with torch. Torch params: {params_torch}, {c_model} params: {params_rf}")
         elif c_model=="xgb":
@@ -73,11 +88,6 @@ def train_challenge_model(data_folder, model_folder, verbose):
             print(f"Train without torch. {c_model} params: {params_xgb}")
         else:
             raise ValueError(f"No such c_model: {c_model}")
-
-    # Get device
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
-    accelerator = "gpu" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-    print(f"Using device {device} and accelerator {accelerator}")
 
     # Find data files.
     start_time = time.time()
@@ -98,57 +108,35 @@ def train_challenge_model(data_folder, model_folder, verbose):
         num_val = int(num_patients * params_torch['val_size'])
         num_train = num_patients - num_val
         patient_ids_aux = patient_ids.copy()
-        random.shuffle(patient_ids_aux) #TODO: Add back in
+        random.shuffle(patient_ids_aux) #TO DO: Add back in
         train_ids = patient_ids_aux[:num_train]
         val_ids = patient_ids_aux[num_train:]
 
         # Get EEG DL data
-        train_dataset_eeg = EEGDataset(data_folder, patient_ids = train_ids, device=device, group = "eeg")
-        val_dataset_eeg = EEGDataset(data_folder, patient_ids = val_ids, device=device, group = "eeg")
-        torch_dataset_eeg = EEGDataset(data_folder, patient_ids = patient_ids, device=device, group = "eeg")
+        train_dataset_eeg = RecordingsDataset(data_folder, patient_ids = train_ids, device=device, group = "EEG", hours_to_use=NUM_HOURS_EEG)
+        val_dataset_eeg = RecordingsDataset(data_folder, patient_ids = val_ids, device=device, group = "EEG", hours_to_use=NUM_HOURS_EEG)
+        torch_dataset_eeg = RecordingsDataset(data_folder, patient_ids = patient_ids, device=device, group = "EEG", hours_to_use=NUM_HOURS_EEG)
         train_loader_eeg = DataLoader(train_dataset_eeg, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=True, pin_memory=True)
         val_loader_eeg = DataLoader(val_dataset_eeg, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=False, pin_memory=True)
         data_loader_eeg = DataLoader(torch_dataset_eeg, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=False, pin_memory=True)
 
-        # Get ECG DL data
-        train_dataset_ecg = EEGDataset(data_folder, patient_ids = train_ids, device=device, group = "ecg")
-        val_dataset_ecg = EEGDataset(data_folder, patient_ids = val_ids, device=device, group = "ecg")
-        torch_dataset_ecg = EEGDataset(data_folder, patient_ids = patient_ids, device=device, group = "ecg")
-        train_loader_ecg = DataLoader(train_dataset_ecg, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=True, pin_memory=True)
-        val_loader_ecg = DataLoader(val_dataset_ecg, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=False, pin_memory=True)
-        data_loader_ecg = DataLoader(torch_dataset_ecg, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=False, pin_memory=True)
-
         # Find last checkpoint
-        model_folder_eeg = os.path.join(model_folder, "eeg")
-        model_folder_ecg = os.path.join(model_folder, "ecg")
+        model_folder_eeg = os.path.join(model_folder, "EEG")
         checkpoint_path_eeg = get_last_chkpt(model_folder_eeg)
-        checkpoint_path_ecg = get_last_chkpt(model_folder_ecg)
 
         # Define torch model
-        torch_model_eeg = get_tv_model(batch_size=params_torch['batch_size'], d_size=len(train_loader_eeg), pretrained=params_torch['pretrained'])
-        torch_model_ecg = get_tv_model(batch_size=params_torch['batch_size'], d_size=len(train_loader_ecg), pretrained=params_torch['pretrained'])
+        torch_model_eeg = get_tv_model(batch_size=params_torch['batch_size'], d_size=len(train_loader_eeg), pretrained=params_torch['pretrained'], channel_size=len(EEG_CHANNELS))
         trainer_eeg = pl.Trainer(
             accelerator=accelerator,
-            devices=params_torch["devices"],
-            num_nodes=params_torch["num_nodes"],
+            #devices=params_torch["devices"],
+            #num_nodes=params_torch["num_nodes"],
             callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", every_n_epochs=1, save_last=True, save_top_k=1)],
             log_every_n_steps=1,
             max_epochs=params_torch['max_epochs'],
             enable_progress_bar=True,
             logger=TensorBoardLogger(model_folder_eeg, name=''),
         )
-        trainer_ecg = pl.Trainer(
-            accelerator=accelerator,
-            devices=params_torch["devices"],
-            num_nodes=params_torch["num_nodes"],
-            callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", every_n_epochs=1, save_last=True, save_top_k=1)],
-            log_every_n_steps=1,
-            max_epochs=params_torch['max_epochs'],
-            enable_progress_bar=True,
-            logger=TensorBoardLogger(model_folder_ecg, name=''),
-        )
         trainer_eeg.logger._default_hp_metric = False
-        trainer_ecg.logger._default_hp_metric = False
 
         # Train EEG torch model
         print("Start training EEG torch model...")
@@ -156,21 +144,49 @@ def train_challenge_model(data_folder, model_folder, verbose):
         trainer_eeg.fit(torch_model_eeg, train_loader_eeg, val_loader_eeg, ckpt_path=checkpoint_path_eeg)
         print(f"Finished training EEG torch model for {params_torch['max_epochs']} epochs after {round((time.time()-start_time_torch)/60,4)} min.")
 
-        # Train ECG torch model
-        print("Start training ECG torch model...")
-        start_time_torch = time.time()
-        trainer_ecg.fit(torch_model_ecg, train_loader_ecg, val_loader_ecg, ckpt_path=checkpoint_path_ecg)
-        print(f"Finished training ECG torch model for {params_torch['max_epochs']} epochs after {round((time.time()-start_time_torch)/60,4)} min.")
-
         # Get EEG predictions
         print("Start predicting EEG torch features ...")
         output_list_eeg, patient_id_list_eeg, hour_list_eeg, quality_list_eeg = torch_prediction(torch_model_eeg, data_loader_eeg, device)
         print("Done with EEG torch.")
 
-        # Get ECG predictions
-        print("Start predicting ECG torch features ...")
-        output_list_ecg, patient_id_list_ecg, hour_list_ecg, quality_list_ecg = torch_prediction(torch_model_ecg, data_loader_ecg, device)
-        print("Done with ECG torch.")
+        if USE_ECG:
+            # Get ECG DL data
+            train_dataset_ecg = RecordingsDataset(data_folder, patient_ids = train_ids, device=device, group = "ECG", hours_to_use=NUM_HOURS_ECG)
+            val_dataset_ecg = RecordingsDataset(data_folder, patient_ids = val_ids, device=device, group = "ECG", hours_to_use=NUM_HOURS_ECG)
+            torch_dataset_ecg = RecordingsDataset(data_folder, patient_ids = patient_ids, device=device, group = "ECG", hours_to_use=NUM_HOURS_ECG)
+            train_loader_ecg = DataLoader(train_dataset_ecg, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=True, pin_memory=True)
+            val_loader_ecg = DataLoader(val_dataset_ecg, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=False, pin_memory=True)
+            data_loader_ecg = DataLoader(torch_dataset_ecg, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=False, pin_memory=True)
+
+            # Find last checkpoint
+            model_folder_ecg = os.path.join(model_folder, "ECG")
+            checkpoint_path_ecg = get_last_chkpt(model_folder_ecg)
+
+            # Define torch model
+            torch_model_ecg = get_tv_model(batch_size=params_torch['batch_size'], d_size=len(train_loader_ecg), pretrained=params_torch['pretrained'], channel_size=len(ECG_CHANNELS))
+        
+            trainer_ecg = pl.Trainer(
+                accelerator=accelerator,
+                devices=params_torch["devices"],
+                num_nodes=params_torch["num_nodes"],
+                callbacks=[ModelCheckpoint(monitor="val_loss", mode="min", every_n_epochs=1, save_last=True, save_top_k=1)],
+                log_every_n_steps=1,
+                max_epochs=params_torch['max_epochs'],
+                enable_progress_bar=True,
+                logger=TensorBoardLogger(model_folder_ecg, name=''),
+            )
+            trainer_ecg.logger._default_hp_metric = False
+
+            # Train ECG torch model
+            print("Start training ECG torch model...")
+            start_time_torch = time.time()
+            trainer_ecg.fit(torch_model_ecg, train_loader_ecg, val_loader_ecg, ckpt_path=checkpoint_path_ecg)
+            print(f"Finished training ECG torch model for {params_torch['max_epochs']} epochs after {round((time.time()-start_time_torch)/60,4)} min.")
+
+            # Get ECG predictions
+            print("Start predicting ECG torch features ...")
+            output_list_ecg, patient_id_list_ecg, hour_list_ecg, quality_list_ecg = torch_prediction(torch_model_ecg, data_loader_ecg, device)
+            print("Done with ECG torch.")
 
         print("Done with torch")
         
@@ -179,6 +195,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
     feature_names = list()
     outcomes = list()
     patients = list()
+    hospitals = list()
+    recording_meta_infos = list()
     cpcs = list()
     patient_ids_aux = list()
     outcome_probabilities_torch_eeg_aux = list()
@@ -191,20 +209,21 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
         # Load data and extract features
         patient_metadata = load_challenge_data(data_folder, patient_ids[i])
-        current_features, current_feature_names = get_features(data_folder, patient_ids[i])
+        current_features, current_feature_names, hospital, recording_infos = get_features(data_folder, patient_ids[i])
 
         if USE_TORCH:
             # Get torch predictions
             agg_outcome_probabilities_torch_eeg, outcome_probabilities_torch_eeg, outcome_flags_torch_eeg = torch_predictions_for_patient(output_list_eeg, patient_id_list_eeg, hour_list_eeg, quality_list_eeg, patient_ids[i])
-            agg_outcome_probabilities_torch_ecg, outcome_probabilities_torch_ecg, outcome_flags_torch_ecg = torch_predictions_for_patient(output_list_ecg, patient_id_list_ecg, hour_list_ecg, quality_list_ecg, patient_ids[i])
-            current_features = np.hstack((current_features, outcome_probabilities_torch_eeg)) #TODO: Combine new torch features, e.g. add outcome_flags_torch
-            current_features = np.hstack((current_features, outcome_probabilities_torch_ecg))
+            current_features = np.hstack((current_features, outcome_probabilities_torch_eeg))
             current_feature_names = np.hstack((current_feature_names, [f"prob_eeg_torch_{i}" for i in range(len(outcome_probabilities_torch_eeg))]))
-            current_feature_names = np.hstack((current_feature_names, [f"prob_ecg_torch_{i}" for i in range(len(outcome_probabilities_torch_ecg))]))
             outcome_probabilities_torch_eeg_aux.append(outcome_probabilities_torch_eeg)
-            outcome_probabilities_torch_ecg_aux.append(outcome_probabilities_torch_ecg)
             outcome_flags_torch_eeg_aux.append(outcome_flags_torch_eeg)
-            outcome_flags_torch_ecg_aux.append(outcome_flags_torch_ecg)
+            if USE_ECG:
+                agg_outcome_probabilities_torch_ecg, outcome_probabilities_torch_ecg, outcome_flags_torch_ecg = torch_predictions_for_patient(output_list_ecg, patient_id_list_ecg, hour_list_ecg, quality_list_ecg, patient_ids[i])
+                current_features = np.hstack((current_features, outcome_probabilities_torch_ecg))
+                current_feature_names = np.hstack((current_feature_names, [f"prob_ecg_torch_{i}" for i in range(len(outcome_probabilities_torch_ecg))]))
+                outcome_probabilities_torch_ecg_aux.append(outcome_probabilities_torch_ecg)
+                outcome_flags_torch_ecg_aux.append(outcome_flags_torch_ecg)
 
         # Extract labels.
         features.append(current_features)
@@ -212,6 +231,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
         current_outcome = get_outcome(patient_metadata)
         outcomes.append(current_outcome)
         current_cpc = get_cpc(patient_metadata)
+        hospitals.append(hospital)
+        recording_meta_infos.append(recording_infos)
         cpcs.append(current_cpc)
         patients.append(patient_ids[i])
 
@@ -220,10 +241,46 @@ def train_challenge_model(data_folder, model_folder, verbose):
     outcomes = np.vstack(outcomes)
     patients = np.vstack(patients)
     cpcs = np.vstack(cpcs)
+    hospitals = np.vstack(hospitals)
+    recording_meta_infos = np.vstack(recording_meta_infos)
 
-    # Impute any missing features; use the mean value by default.
-    imputer = SimpleImputer().fit(features)
-    features = imputer.transform(features)
+    # Save the features and outcomes features.
+    print("Saving features...")
+    train_pd = pd.DataFrame(features, columns=feature_names[0])
+    train_pd['patient_ids'] = patients
+    train_pd['outcome'] = outcomes
+    train_pd['cpc'] = cpcs
+    train_pd['hospital'] = hospitals
+    first_column = train_pd.pop('patient_ids')
+    train_pd.insert(0, 'patient_ids', first_column)
+    for key in recording_meta_infos[0][0].keys():
+        values_aux = list()
+        for i in range(len(recording_meta_infos)):
+            values_aux.append(recording_meta_infos[i][0][key])
+        train_pd[key] = values_aux
+    train_pd.to_csv(os.path.join(model_folder, 'train_features.csv'), index=False)
+
+    # Impute any missing features; use the mean value by default. #TODO: Improve this
+    if IMPUTE:
+        print("Imputing features...")
+        imputer = SimpleImputer().fit(features)
+        features = imputer.transform(features)
+    else:
+        imputer = None
+
+    # Save the imputed features.
+    print("Saving imputed features...")
+    train_imputed_pd = pd.DataFrame(features, columns=feature_names[0])
+    train_imputed_pd['patient_ids'] = patients
+    train_imputed_pd['outcome'] = outcomes
+    train_imputed_pd['cpc'] = cpcs
+    train_imputed_pd['hospital'] = hospitals
+    for key in recording_meta_infos[0][0].keys():
+        values_aux = list()
+        for i in range(len(recording_meta_infos)):
+            values_aux.append(recording_meta_infos[i][0][key])
+        train_imputed_pd[key] = values_aux
+    train_imputed_pd.to_csv(os.path.join(model_folder, 'train_imputed_features.csv'), index=False)
 
     # Train the models.
     print("Start training challenge models...")
@@ -233,14 +290,13 @@ def train_challenge_model(data_folder, model_folder, verbose):
     elif c_model == "xgb":
         outcome_model = xgb.XGBClassifier(**params_xgb)
         cpc_model = xgb.XGBRegressor(**params_xgb)
-
     outcome_model.fit(features, outcomes.ravel())
     cpc_model.fit(features, cpcs.ravel())
     
     # Save the models.
     save_challenge_model(model_folder, imputer, outcome_model, cpc_model, torch_model_eeg=torch_model_eeg, torch_model_ecg=torch_model_ecg)
 
-    # Plot and save feature importance
+    # Plot and save feature importance.
     feature_importance = outcome_model.feature_importances_
     feature_importance = 100.0 * (feature_importance / feature_importance.max())
     sorted_idx = np.argsort(feature_importance)
@@ -265,8 +321,11 @@ def load_challenge_models(model_folder, verbose):
     file_path_eeg = os.path.join(model_folder, 'eeg', 'checkpoint.pth')
     file_path_ecg = os.path.join(model_folder, 'ecg', 'checkpoint.pth')
     if USE_TORCH:
-        model["torch_model_eeg"] = load_last_pt_ckpt(file_path_eeg)
-        model["torch_model_ecg"] = load_last_pt_ckpt(file_path_ecg)
+        model["torch_model_eeg"] = load_last_pt_ckpt(file_path_eeg, channel_size=len(EEG_CHANNELS))
+        if USE_ECG:
+            model["torch_model_ecg"] = load_last_pt_ckpt(file_path_ecg, channel_size=len(ECG_CHANNELS))
+        else:
+            model["torch_model_ecg"] = None
     else:
         model["torch_model_eeg"] = None
         model["torch_model_ecg"] = None
@@ -282,28 +341,31 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
     torch_model_eeg = models['torch_model_eeg']
     torch_model_ecg = models['torch_model_ecg']
 
-    # Get device
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
-
     # Load data.
-    features, _ = get_features(data_folder, patient_id) 
+    features, _, _, _ = get_features(data_folder, patient_id) 
 
     # Torch prediction
     if USE_TORCH:
-        data_set_eeg = EEGDataset(data_folder, patient_ids = [patient_id], device = device, load_labels = False, group="eeg")
-        data_set_ecg = EEGDataset(data_folder, patient_ids = [patient_id], device = device, load_labels = False, group="ecg")
+        if USE_GPU:
+            device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+        else:
+            device = "cpu"
+        data_set_eeg = RecordingsDataset(data_folder, patient_ids = [patient_id], device = device, load_labels = False, group="EEG", hours_to_use = NUM_HOURS_EEG)
         data_loader_eeg = DataLoader(data_set_eeg, batch_size=1, num_workers=PARAMS_DEVICE["num_workers"], shuffle=False)
-        data_loader_ecg = DataLoader(data_set_ecg, batch_size=1, num_workers=PARAMS_DEVICE["num_workers"], shuffle=False)
         output_list_eeg, patient_id_list_eeg, hour_list_eeg, quality_list_eeg = torch_prediction(torch_model_eeg, data_loader_eeg, device)
-        output_list_ecg, patient_id_list_ecg, hour_list_ecg, quality_list_ecg = torch_prediction(torch_model_ecg, data_loader_ecg, device)
         agg_outcome_probability_torch_eeg, outcome_probabilities_torch_eeg, outcome_flags_torch_eeg = torch_predictions_for_patient(output_list_eeg, patient_id_list_eeg, hour_list_eeg, quality_list_eeg, patient_id)
-        agg_outcome_probability_torch_ecg, outcome_probabilities_torch_ecg, outcome_flags_torch_ecg = torch_predictions_for_patient(output_list_ecg, patient_id_list_ecg, hour_list_ecg, quality_list_ecg, patient_id)
-        features = np.hstack((features, outcome_probabilities_torch_eeg)) #TODO: Combine new torch features, e.g. add outcome_flags_torch
-        features = np.hstack((features, outcome_probabilities_torch_ecg))
+        features = np.hstack((features, outcome_probabilities_torch_eeg))
+        if USE_ECG:
+            data_set_ecg = RecordingsDataset(data_folder, patient_ids = [patient_id], device = device, load_labels = False, group="ECG", hours_to_use = NUM_HOURS_ECG)
+            data_loader_ecg = DataLoader(data_set_ecg, batch_size=1, num_workers=PARAMS_DEVICE["num_workers"], shuffle=False)
+            output_list_ecg, patient_id_list_ecg, hour_list_ecg, quality_list_ecg = torch_prediction(torch_model_ecg, data_loader_ecg, device)
+            agg_outcome_probability_torch_ecg, outcome_probabilities_torch_ecg, outcome_flags_torch_ecg = torch_predictions_for_patient(output_list_ecg, patient_id_list_ecg, hour_list_ecg, quality_list_ecg, patient_id)
+            features = np.hstack((features, outcome_probabilities_torch_ecg))
 
     # Impute missing data.
     features = features.reshape(1, -1)
-    features = imputer.transform(features)
+    if imputer is not None:
+        features = imputer.transform(features)
 
     # Apply models to features.
     outcome = outcome_model.predict(features)[0]
@@ -322,6 +384,29 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
 # Optional functions. You can change or remove these functions and/or add new functions.
 #
 ################################################################################
+def get_quality(string):
+    start_time_sec = convert_hours_minutes_seconds_to_seconds(*get_start_time(string))
+    end_time_sec = convert_hours_minutes_seconds_to_seconds(*get_end_time(string))
+    quality = (end_time_sec - start_time_sec) / 3600
+    return quality
+
+
+def get_hour(string):
+    hour_start = get_start_time(string)[0]
+    return hour_start
+
+
+def find_recording_files(data_folder, patient_id, group=""):
+    record_names = list()
+    patient_folder = os.path.join(data_folder, patient_id)
+    for file_name in sorted(os.listdir(patient_folder)):
+        if not file_name.startswith('.') and file_name.endswith(f'{group}.hea'):
+            root, ext = os.path.splitext(file_name)
+            record_name = '_'.join(root.split('_')[:-1])
+            record_names.append(record_name)
+    return sorted(record_names)
+
+
 def get_last_chkpt(model_folder):
     if os.path.exists(model_folder):
         # Find last version folder
@@ -361,8 +446,8 @@ def torch_prediction(model, data_loader, device):
             outputs = torch.sigmoid(outputs)
             output_list = output_list + outputs.cpu().numpy().tolist()
             patient_id_list = patient_id_list + ids
-            hour_list = hour_list + hours
-            quality_list = quality_list + qualities
+            hour_list = hour_list + list(hours.cpu().detach().numpy())
+            quality_list = quality_list + list(qualities.cpu().detach().numpy())
     return output_list, patient_id_list, hour_list, quality_list
 
 
@@ -383,7 +468,10 @@ def torch_predictions_for_patient(output_list, patient_id_list, hour_list, quali
 
     #  Get values
     outcome_probabilities_torch = [outcome_probabilities_torch[hours_patients.index(hour)] if hour in hours_patients else np.nan for hour in range(max_hours)]
-    outcome_probabilities_torch_imputed = pd.Series(outcome_probabilities_torch, dtype=object).fillna(0).tolist()
+    if IMPUTE:
+        outcome_probabilities_torch_imputed = pd.Series(outcome_probabilities_torch, dtype=object).bfill().tolist()
+    else:
+        outcome_probabilities_torch_imputed = pd.Series(outcome_probabilities_torch, dtype=object).tolist()
     outcome_flags_torch = [1 if hour in hours_patients else 0 for hour in range(max_hours)]
 
     # Aggregate the probabilities
@@ -414,21 +502,22 @@ def torch_predictions_for_patient(output_list, patient_id_list, hour_list, quali
     return agg_outcome_probability_torch, outcome_probabilities_torch_imputed, outcome_flags_torch
 
 
-def get_tv_model(model_name="densenet121", num_classes=1, batch_size=64, d_size=500, pretrained=False):
+def get_tv_model(model_name="densenet121", num_classes=1, batch_size=64, d_size=500, pretrained=False, channel_size=3):
     model = torchvisionModel(
             model_name=model_name,
             num_classes=num_classes,
             print_freq=250,
             batch_size=batch_size,
             d_size=d_size,
-            pretrained=pretrained
+            pretrained=pretrained,
+            channel_size=channel_size,
         )
     return model
 
 
 # Load last checkpoint
-def load_last_pt_ckpt(ckpt_path):
-    model = get_tv_model()
+def load_last_pt_ckpt(ckpt_path, channel_size):
+    model = get_tv_model(channel_size=channel_size)
     if os.path.isfile(ckpt_path):
         print(
             f"Loading checkpoint from {ckpt_path}"
@@ -464,10 +553,10 @@ def preprocess_data(data, sampling_frequency, utility_frequency):
 
     # If the utility frequency is between bandpass frequencies, then apply a notch filter.
     if utility_frequency is not None and passband[0] <= utility_frequency <= passband[1]:
-        data = mne.filter.notch_filter(data, sampling_frequency, utility_frequency, n_jobs=4, verbose='error')
+        data = mne.filter.notch_filter(data, sampling_frequency, utility_frequency, n_jobs=1, verbose='error')
 
     # Apply a bandpass filter.
-    data = mne.filter.filter_data(data, sampling_frequency, passband[0], passband[1], n_jobs=4, verbose='error')
+    data = mne.filter.filter_data(data, sampling_frequency, passband[0], passband[1], n_jobs=1, verbose='error')
 
     # Resample the data.
     if sampling_frequency % 2 == 0:
@@ -490,87 +579,167 @@ def preprocess_data(data, sampling_frequency, utility_frequency):
 
     return data, resampling_frequency
 
-# Load recording data. #TODO: All use all recordings
+# Load recording data.
 def get_recording_features(recording_ids, recording_id_to_use, data_folder, patient_id, group, channels_to_use):
     if group == "EEG":
-        dummy_channels = 8
+        if BIPOLAR_MONTAGES is not None:
+            channel_length = len(BIPOLAR_MONTAGES)
+        else:
+            channel_length = len(channels_to_use)
+        dummy_channels = channel_length * 4
+        recording_feature_names = np.array((np.array([f"delta_psd_mean_c_{i}_hour_{recording_id_to_use}" for i in range(channel_length)]), np.array([f"theta_psd_mean_c_{i}_hour_{recording_id_to_use}" for i in range(channel_length)]), np.array([f"alpha_psd_mean_c_{i}_hour_{recording_id_to_use}" for i in range(channel_length)]), np.array([f"beta_psd_mean_c_{i}_hour_{recording_id_to_use}" for i in range(channel_length)]))).T.flatten()
     elif group == "ECG":
-        dummy_channels = 10
+        channel_length = len(channels_to_use)
+        dummy_channels = channel_length * 2
+        recording_feature_names = np.array((np.array([f"ECG_mean_c_{i}_hour_{recording_id_to_use}" for i in range(channel_length)]), np.array([f"ECG_std_c_{i}_hour_{recording_id_to_use}" for i in range(channel_length)]))).T.flatten()
     else:
         raise ValueError("Group should be either ECG or EEG")
+    
     if len(recording_ids) > 0:
-        recording_id = recording_ids[recording_id_to_use]
-        recording_location = os.path.join(data_folder, patient_id, '{}_{}'.format(recording_id, group))
-        if os.path.exists(recording_location + '.hea'):
-            data, channels, sampling_frequency = load_recording_data(recording_location)
-            utility_frequency = get_utility_frequency(recording_location + '.hea')
-            if all(channel in channels for channel in channels_to_use) or group == "ECG":
-                data, channels = reduce_channels(data, channels, channels_to_use)
-                data, sampling_frequency = preprocess_data(data, sampling_frequency, utility_frequency)
-                if group == "EEG":
-                    if BIPOLAR_MONTAGES is not None:
-                        data = np.array([data[channels.index(montage[0]), :] - data[channels.index(montage[1]), :] for montage in BIPOLAR_MONTAGES])
-                    recording_features, recording_feature_names = get_eeg_features(data, sampling_frequency)
-                elif group == "ECG":
-                    features, recording_feature_names_aux = get_ecg_features(data)
-                    recording_features = expand_channels(features, channels, channels_to_use).flatten()
-                    if channels == channels_to_use:
-                        recording_feature_names = recording_feature_names_aux.flatten()
+        if abs(recording_id_to_use) <= len(recording_ids):
+            recording_id = recording_ids[recording_id_to_use]
+            recording_location = os.path.join(data_folder, patient_id, '{}_{}'.format(recording_id, group))
+            if os.path.exists(recording_location + '.hea'):
+                data, channels, sampling_frequency = load_recording_data(recording_location)
+                hea_file = load_text_file(recording_location + '.hea')
+                utility_frequency = get_utility_frequency(hea_file)
+                quality = get_quality(hea_file)
+                hour = get_hour(hea_file)
+                if all(channel in channels for channel in channels_to_use) or group == "ECG":
+                    data, channels = reduce_channels(data, channels, channels_to_use)
+                    data, sampling_frequency = preprocess_data(data, sampling_frequency, utility_frequency)
+                    if group == "EEG":
+                        if BIPOLAR_MONTAGES is not None:
+                            data = np.array([data[channels.index(montage[0]), :] - data[channels.index(montage[1]), :] for montage in BIPOLAR_MONTAGES])
+                        recording_features = get_eeg_features(data, sampling_frequency)
+                    elif group == "ECG":
+                        features = get_ecg_features(data)
+                        recording_features = expand_channels(features, channels, channels_to_use).flatten()
                     else:
-                        num_current_channels, num_samples = np.shape(recording_feature_names_aux)
-                        num_requested_channels = len(channels_to_use)
-                        recording_feature_names = np.empty((num_requested_channels, num_samples), "S15")
-                        for i, channel in enumerate(channels_to_use):
-                            if channel in channels:
-                                j = channels.index(channel)
-                                recording_feature_names[i, :] = [f"{n}_{i}" for n in recording_feature_names_aux[j, :]]
-                            else:
-                                recording_feature_names[i, :] = f'ECG_nan_{i}'
-                        recording_feature_names = recording_feature_names.flatten()
+                        raise NotImplementedError(f"Group {group} not implemented.")
                 else:
-                    raise NotImplementedError(f"Group {group} not implemented.")
+                    print(f"For patient {patient_id} recording {recording_id} the channels {channels_to_use} are not all available. Only {channels} are available.")
+                    recording_features = float('nan') * np.ones(dummy_channels) # 2 bipolar channels * 4 features / channel
             else:
-                print(f"For patient {patient_id} recording {recording_id} the channels {channels_to_use} are not all available.")
                 recording_features = float('nan') * np.ones(dummy_channels) # 2 bipolar channels * 4 features / channel
-                recording_feature_names = [f'{group}_nan_{i}' for i in range(dummy_channels)]
+                sampling_frequency = utility_frequency = channels = quality = hour = None
         else:
             recording_features = float('nan') * np.ones(dummy_channels) # 2 bipolar channels * 4 features / channel
-            recording_feature_names = [f'{group}_nan_{i}' for i in range(dummy_channels)]
+            sampling_frequency = utility_frequency = channels = recording_id = quality = hour = None
     else:
         recording_features = float('nan') * np.ones(dummy_channels) # 2 bipolar channels * 4 features / channel
-        recording_feature_names = [f'{group}_nan_{i}' for i in range(dummy_channels)]
+        sampling_frequency = utility_frequency = channels = recording_id = quality = hour = None
 
-    return recording_features, recording_feature_names
-
-
+    return recording_features, recording_feature_names, sampling_frequency, utility_frequency, channels, recording_id, quality, hour
 
 # Extract features from the data.
 def get_features(data_folder, patient_id, return_as_dict=False):
     # Load patient data.
     patient_metadata = load_challenge_data(data_folder, patient_id)
-    recording_ids = find_recording_files(data_folder, patient_id)
-    num_recordings = len(recording_ids)
+    recording_ids_eeg = find_recording_files(data_folder, patient_id, "EEG")
+    if USE_ECG:
+        recording_ids_ecg = find_recording_files(data_folder, patient_id, "ECG")
 
     # Extract patient features.
-    patient_features, patient_feature_names = get_patient_features(patient_metadata)
+    patient_features, patient_feature_names = get_patient_features(patient_metadata, recording_ids_eeg)
+    hospital = get_hospital(patient_metadata)
 
-    # Extract EEG features.
-    eeg_features, eeg_feature_names = get_recording_features(recording_ids=recording_ids, recording_id_to_use=-1, data_folder=data_folder, patient_id=patient_id, group="EEG", channels_to_use=EEG_CHANNELS)
+    # Check which hours to use.
+    if NUM_HOURS_EEG < 0:
+        use_last_hours_eeg = True
+        hours_eeg = -NUM_HOURS_EEG
+        start_eeg = 1
+    elif NUM_HOURS_EEG > 0:
+        use_last_hours_eeg = False
+        hours_eeg = NUM_HOURS_EEG
+        start_eeg = 0
+    else:
+        raise ValueError("NUM_HOURS_EEG should be either positive or negative.")
+    if USE_ECG:
+        if NUM_HOURS_ECG < 0:
+            use_last_hours_ecg = True
+            hours_ecg = -NUM_HOURS_ECG
+            start_ecg = 1
+        elif NUM_HOURS_ECG > 0:
+            use_last_hours_ecg = False
+            hours_ecg = NUM_HOURS_ECG
+            start_ecg = 0
+        else:
+            raise ValueError("NUM_HOURS_ECG should be either positive or negative.")
 
-    # Extract ECG features.
-    ecg_features, ecg_feature_names = get_recording_features(recording_ids=recording_ids, recording_id_to_use=0, data_folder=data_folder, patient_id=patient_id, group="ECG", channels_to_use=ECG_CHANNELS)
+    # Extract recording features.
+    eeg_features_list = list()
+    eeg_feature_names_list = list()
+    eeg_sampling_frequency_list = list()
+    eeg_utility_frequency_list = list()
+    eeg_channels_list = list()
+    eeg_recording_id_list = list()
+    eeg_quality_list = list()
+    eeg_hour_list = list()
+    ecg_features_list = list()
+    ecg_feature_names_list = list()
+    ecg_sampling_frequency_list = list()
+    ecg_utility_frequency_list = list()
+    ecg_channels_list = list()
+    ecg_recording_id_list = list()
+    ecg_quality_list = list()
+    ecg_hour_list = list()
+    for h in range(start_eeg,(hours_eeg+start_eeg)):
+        if use_last_hours_eeg:
+            h_to_use = -h
+        eeg_features, eeg_feature_names, eeg_sampling_frequency, eeg_utility_frequency, eeg_channels, eeg_recording_id, eeg_quality, eeg_hour = get_recording_features(recording_ids=recording_ids_eeg, recording_id_to_use=h_to_use, data_folder=data_folder, patient_id=patient_id, group="EEG", channels_to_use=EEG_CHANNELS)
+        eeg_features_list.append(eeg_features)
+        eeg_feature_names_list.append(eeg_feature_names)
+        eeg_sampling_frequency_list.append(eeg_sampling_frequency)
+        eeg_utility_frequency_list.append(eeg_utility_frequency)
+        eeg_channels_list.append(eeg_channels)
+        eeg_recording_id_list.append(eeg_recording_id)
+        eeg_quality_list.append(eeg_quality)
+        eeg_hour_list.append(eeg_hour)
+    if USE_ECG:
+        for h in range(start_ecg,(hours_ecg+start_ecg)):
+            if use_last_hours_ecg:
+                h_to_use = -h
+            ecg_features, ecg_feature_names, ecg_sampling_frequency, ecg_utility_frequency, ecg_channels, ecg_recording_id, ecg_quality, ecg_hour = get_recording_features(recording_ids=recording_ids_ecg, recording_id_to_use=h_to_use, data_folder=data_folder, patient_id=patient_id, group="ECG", channels_to_use=ECG_CHANNELS)
+            ecg_features_list.append(ecg_features)
+            ecg_feature_names_list.append(ecg_feature_names)
+            ecg_sampling_frequency_list.append(ecg_sampling_frequency)
+            ecg_utility_frequency_list.append(ecg_utility_frequency)
+            ecg_channels_list.append(ecg_channels)
+            ecg_recording_id_list.append(ecg_recording_id)
+            ecg_quality_list.append(ecg_quality)
+            ecg_hour_list.append(ecg_hour)
+
+    recording_infos = {
+        'eeg_sampling_frequency': eeg_sampling_frequency_list,
+        'eeg_utility_frequency': eeg_utility_frequency_list,
+        'eeg_channels': eeg_channels_list,
+        'eeg_recording_id': eeg_recording_id_list,
+        'eeg_quality': eeg_quality_list,
+        'eeg_hour': eeg_hour_list,
+        'ecg_sampling_frequency': ecg_sampling_frequency_list,
+        'ecg_utility_frequency': ecg_utility_frequency_list,
+        'ecg_channels': ecg_channels_list,
+        'ecg_recording_id': ecg_recording_id_list,
+        'ecg_quality': ecg_quality_list,
+        'ecg_hour': ecg_hour_list
+    }
 
     # Extract features.
-    feature_values = np.hstack((patient_features, eeg_features, ecg_features))
-    feature_names = np.hstack((patient_feature_names, eeg_feature_names, ecg_feature_names))
+    if USE_ECG:
+        feature_values = np.hstack((patient_features, np.hstack(eeg_features_list), np.hstack(ecg_features_list)))
+        feature_names = np.hstack((patient_feature_names, np.hstack(eeg_feature_names_list), np.hstack(ecg_feature_names_list)))
+    else:
+        feature_values = np.hstack((patient_features, np.hstack(eeg_features_list)))
+        feature_names = np.hstack((patient_feature_names, np.hstack(eeg_feature_names_list)))
 
     if return_as_dict:
         return {k: v for k, v in zip(feature_names, feature_values)}
     else:
-        return feature_values, feature_names
+        return feature_values, feature_names, hospital, recording_infos
 
 # Extract patient features from the data.
-def get_patient_features(data):
+def get_patient_features(data, recording_ids_eeg):
     age = get_age(data)
     sex = get_sex(data)
     rosc = get_rosc(data)
@@ -592,8 +761,10 @@ def get_patient_features(data):
         male   = 0
         other  = 1
 
-    features = np.array((age, female, male, other, rosc, ohca, shockable_rhythm, ttm))
-    feature_names = ["age", "female", "male", "other", "rosc", "ohca", "shockable_rhythm", "ttm"]
+    last_eeg_hour = np.max([int(r.split("_")[-1]) for r in recording_ids_eeg])
+
+    features = np.array((age, female, male, other, rosc, ohca, shockable_rhythm, ttm, last_eeg_hour))
+    feature_names = ["age", "female", "male", "other", "rosc", "ohca", "shockable_rhythm", "ttm", "last_eeg_hour"]
 
     return features, feature_names
 
@@ -615,9 +786,8 @@ def get_eeg_features(data, sampling_frequency):
         delta_psd_mean = theta_psd_mean = alpha_psd_mean = beta_psd_mean = float('nan') * np.ones(num_channels)
     features = np.array((delta_psd_mean, theta_psd_mean, alpha_psd_mean, beta_psd_mean)).T
     features = features.flatten()
-    feature_names = np.array((np.array([f"delta_psd_mean_{i}" for i in range(data.shape[0])]), np.array([f"theta_psd_mean_{i}" for i in range(data.shape[0])]), np.array([f"alpha_psd_mean_{i}" for i in range(data.shape[0])]), np.array([f"beta_psd_mean_{i}" for i in range(data.shape[0])]))).T.flatten()
 
-    return features, feature_names
+    return features
 
 # Extract features from the ECG data.
 def get_ecg_features(data):
@@ -634,53 +804,52 @@ def get_ecg_features(data):
         std = float('nan') * np.ones(num_channels)
 
     features = np.array((mean, std)).T
-    feature_names = np.array((np.array([f"ECG_mean_{i}" for i in range(data.shape[0])]), np.array([f"ECG_std_{i}" for i in range(data.shape[0])]))).T
 
-    return features, feature_names
+    return features
 
 
-class EEGDataset(Dataset):
+class RecordingsDataset(Dataset):
     def __init__(
-        self, data_folder, patient_ids, device, group = "EEG", load_labels: bool=True
+        self, data_folder, patient_ids, device, group = "EEG", load_labels: bool=True, hours_to_use: int=None
     ):
-        
+        self.hours_to_use = hours_to_use
         self.group = group
         if self.group == "EEG":
-            self.channels = EEG_CHANNELS
+            self.channels_to_use = EEG_CHANNELS
         elif self.group == "ECG":
-            self.channels = ECG_CHANNELS
+            self.channels_to_use = ECG_CHANNELS
         else:
             raise NotImplementedError(f"Group {self.group} not implemented.")
 
         recording_locations_list = list()
         patient_ids_list = list()
         labels_list = list()
-        hours_list = list()
-        qualities_list = list()
         for patient_id in patient_ids:
             patient_metadata = load_challenge_data(data_folder, patient_id)
-            recording_ids = find_recording_files(data_folder, patient_id)
-            recording_metadata_file = os.path.join(data_folder, patient_id, patient_id + '.tsv')
-            recording_metadata = load_text_file(recording_metadata_file)
-            hours = get_variable(recording_metadata, 'Hour', str)
-            qualities = get_variable(recording_metadata, 'Quality', str)
+            recording_ids = find_recording_files(data_folder, patient_id, self.group)
+            if self.hours_to_use is not None:
+                if abs(self.hours_to_use) < len(recording_ids):
+                    if self.hours_to_use > 0:
+                        recording_ids = recording_ids[:self.hours_to_use]
+                    else:
+                        recording_ids = recording_ids[self.hours_to_use:]
+            #recording_metadata_file = os.path.join(data_folder, patient_id, patient_id + '.tsv')
+            #recording_metadata = load_text_file(recording_metadata_file)
+            #hours = get_variable(recording_metadata, 'Hour', str)
+            #qualities = get_variable(recording_metadata, 'Quality', str)
             if load_labels:
                 current_outcome = get_outcome(patient_metadata)
             else:
                 current_outcome = 0
-            for recording_id, hour, quality in zip(recording_ids, hours, qualities):
+            for recording_id in recording_ids:
                 if not is_nan(recording_id):
                     recording_locations_list.append(os.path.join(data_folder, patient_id, '{}_{}'.format(recording_id, self.group)))
                     patient_ids_list.append(patient_id)
                     labels_list.append(current_outcome)
-                    hours_list.append(hour)
-                    qualities_list.append(quality)
     
         self.recording_locations = recording_locations_list
         self.patient_ids = patient_ids_list
         self.labels = labels_list
-        self.hours = hours_list
-        self.qualities = qualities_list
         self.device = device
         self._precision = torch.float32
 
@@ -688,22 +857,41 @@ class EEGDataset(Dataset):
         return len(self.labels)
 
     def __getitem__(self, idx):
+        # Load the data.
         signal_data, signal_channels, sampling_frequency = load_recording_data(self.recording_locations[idx])
-        utility_frequency = get_utility_frequency(self.recording_locations[idx] + '.hea')
-        signal_data, signal_channels = reduce_channels(signal_data, signal_channels, self.channels)
+        hea_file = load_text_file(self.recording_locations[idx] + '.hea')
+        utility_frequency = get_utility_frequency(hea_file)
+        signal_data, signal_channels = reduce_channels(signal_data, signal_channels, self.channels_to_use)
+
+        # Preprocess the data. #TODO: Make this smarter. What to do if only a few seconds are available?
+        sampling_frequency_old = sampling_frequency
         signal_data, sampling_frequency = preprocess_data(signal_data, sampling_frequency, utility_frequency)
-        spectrograms = librosa.feature.melspectrogram(y=signal_data, sr=100, n_mels=224)
-        spectrograms = torch.from_numpy(spectrograms)
+        points_full_hour = 60*60*sampling_frequency
+        available_points = signal_data.shape[1]/points_full_hour
+        target_size = 901
+        hop_length = int(round(signal_data.shape[1]/target_size,0))
+        spectrograms = librosa.feature.melspectrogram(y=signal_data, sr=sampling_frequency, n_mels=224, hop_length=hop_length)
+        spectrograms = torch.from_numpy(spectrograms.astype(np.float32))
         spectrograms = nn.functional.normalize(spectrograms).to(self._precision)
+        spectrograms = spectrograms.unsqueeze(0)
+        spectrograms_resized = F.interpolate(spectrograms, size=(spectrograms.shape[2], target_size), mode='bilinear', align_corners=False)
+        spectrograms = spectrograms_resized.squeeze(0)
+
+        # Get the label.
         id = self.patient_ids[idx]
         label = self.labels[idx]
-        hour = self.hours[idx]
-        quality = self.qualities[idx]
+        hour = get_hour(hea_file)
+        quality = get_quality(hea_file)
+        label = torch.from_numpy(np.array(label).astype(np.float32)).to(self._precision)
+        return_dict =  {"image": spectrograms.to(self._precision), "label": label.to(self._precision), "id": id, "hour": hour, "quality": quality}
 
-        label = torch.from_numpy(np.array(label)).to(self._precision)
+        #print("------------------------------------------------------------------------")
+        #print(f"Patiens: {id}, hour: {hour}, quality: {quality}, available_points: {available_points}, type: {self.group}, sampling_frequency_old: {sampling_frequency_old}, utility-freq: {utility_frequency}, sampling_frequency: {sampling_frequency}, hop_length: {hop_length}")
+        #print(f"Signal shape: {signal_data.shape}")
+        #print(f"Spectrograms shape: {spectrograms.shape}")
 
-        return {"image": spectrograms, "label": label, "id": id, "hour": hour, "quality": quality}
-
+        return return_dict
+    
 
 class torchvisionModel(pl.LightningModule):
     def __init__(
@@ -715,6 +903,7 @@ class torchvisionModel(pl.LightningModule):
         batch_size=10,
         d_size=500,
         pretrained=False,
+        channel_size=3,
     ):
         super().__init__()
         self._d_size = d_size
@@ -731,7 +920,7 @@ class torchvisionModel(pl.LightningModule):
             self.model.load_state_dict(state_dict)
         else:
             print(f"Using {model_name} model from scratch")
-        self.model.features[0] = nn.Conv2d(18, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.model.features[0] = nn.Conv2d(channel_size, 64, kernel_size=7, stride=2, padding=3, bias=False)
 
         # freeze_model(self.model)
         if "resnet" in model_name.lower():
@@ -792,7 +981,12 @@ class torchvisionModel(pl.LightningModule):
         out = out.squeeze()
         if self.classification == "multilabel":
             prob = torch.sigmoid(out)
-            loss = F.binary_cross_entropy(prob, lab)
+            if img.shape[0] == 1:
+                prob = prob.unsqueeze(0)
+            try:
+                loss = F.binary_cross_entropy(prob, lab)
+            except:
+                raise
         elif self.classification == "multiclass":
             prob = F.softmax(out, dim=1)
             loss = F.cross_entropy(out, lab)
