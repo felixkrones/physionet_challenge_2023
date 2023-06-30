@@ -869,7 +869,7 @@ class RecordingsDataset(Dataset):
         points_full_hour = 60*60*sampling_frequency
         available_points = signal_data.shape[1]/points_full_hour
         target_size = 901
-        hop_length = int(round(signal_data.shape[1]/target_size,0))
+        hop_length = max(int(round(signal_data.shape[1]/target_size,0)),1)
         spectrograms = librosa.feature.melspectrogram(y=signal_data, sr=sampling_frequency, n_mels=224, hop_length=hop_length)
         spectrograms = torch.from_numpy(spectrograms.astype(np.float32))
         spectrograms = nn.functional.normalize(spectrograms).to(self._precision)
