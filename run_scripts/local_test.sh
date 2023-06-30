@@ -1,3 +1,3 @@
-python train_model.py "/Users/felixkrones/python_projects/data/physionet_challenge_2023/physionet.org/files/i-care/2.0/training/" "data/02_models/test_torch_model/"
-python run_model.py "data/02_models/test_torch_model/" "/Users/felixkrones/python_projects/data/physionet_challenge_2023/physionet.org/files/i-care/2.0/testing/" "data/03_model_output/test_torch_model/"
-python evaluate_model.py "/Users/felixkrones/python_projects/data/physionet_challenge_2023/physionet.org/files/i-care/2.0/testing/" "data/03_model_output/test_torch_model/" "data/04_reportings/test_torch_model/seed_test_results.csv"
+python train_model.py "/Users/felixkrones/python_projects/data/physionet_challenge_2023/physionet.org/files/i-care/2.0/training/" "data/02_models/test_test_model/"
+python run_model.py "data/02_models/test_test_model/" "/Users/felixkrones/python_projects/data/physionet_challenge_2023/physionet.org/files/i-care/2.0/testing/" "data/03_model_output/test_test_model/"
+python evaluate_model.py "/Users/felixkrones/python_projects/data/physionet_challenge_2023/physionet.org/files/i-care/2.0/testing/" "data/03_model_output/test_test_model/" "data/04_reportings/test_test_model/seed_test_results.csv"
