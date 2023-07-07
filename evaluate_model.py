@@ -389,7 +389,7 @@ def compute_mae(labels, outputs):
     return mae
 
 # Plot the decision threshold curve.
-def decision_threshold_plot(true_labels, prediction_probabilities, output_directory):
+def decision_threshold_plot(true_labels, prediction_probabilities, output_directory, split_string):
     """
     Plot the decision threshold curve.
     """
@@ -438,18 +438,17 @@ def decision_threshold_plot(true_labels, prediction_probabilities, output_direct
     # Save the plots
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
-    plot_path_png = os.path.join(output_directory, "threshold_plot.png")
+    plot_path_png = os.path.join(output_directory, f"split_{split_string}_threshold_plot.png")
     plt.savefig(plot_path_png)
-    plot_path_pdf = os.path.join(output_directory, "threshold_plot.pdf")
+    plot_path_pdf = os.path.join(output_directory, f"split_{split_string}_threshold_plot.pdf")
     plt.savefig(plot_path_pdf)
 
     # Close the figure
     plt.close()
 
 # Plot the ROC curve.
-def plot_auc_curves(sklearn_roc, auroc_outcomes, challenge_score, roc_path, output_string, fontsize=12):
+def plot_auc_curves(sklearn_roc, auroc_outcomes, challenge_score, roc_path, output_string, fontsize=12, split_string=""):
     # Plot the ROC curve from sklearn_roc and save it to a file.
-    seed = sys.argv[3].split("seed_")[-1].split("_")[0]
     if not os.path.exists(roc_path):
         os.makedirs(roc_path, exist_ok=True)
     plt.figure()
@@ -457,10 +456,10 @@ def plot_auc_curves(sklearn_roc, auroc_outcomes, challenge_score, roc_path, outp
     plt.axvline(x=0.05, color="black")
     plt.xlabel('False Positive Rate', fontsize=fontsize)
     plt.ylabel('True Positive Rate', fontsize=fontsize)
-    plt.title(f'ROC Curve (seed {seed}), AUC = {round(auroc_outcomes,3)}, score = {round(challenge_score,3)}', fontsize=fontsize*1.2)
+    plt.title(f'ROC Curve (split {split_string}), AUC = {round(auroc_outcomes,3)}, score = {round(challenge_score,3)}', fontsize=fontsize*1.2)
     plt.xticks(fontsize=fontsize*0.9)
     plt.yticks(fontsize=fontsize*0.9)
-    plt.savefig(f'{roc_path}seed_{seed}_roc_curve.png')
+    plt.savefig(os.path.join(roc_path,f"split_{split_string}_roc_curve.png"))
 
     # Output the scores to screen and/or a file.
     if len(sys.argv) == 3:
@@ -521,7 +520,7 @@ if __name__ == '__main__':
         f'Subgroup auc: {subgroup_aucs}'
 
     # Plot the ROC curve.
-    plot_auc_curves(sklearn_roc, auroc_outcomes, challenge_score, f'{"/".join(sys.argv[3].split("/")[:-1])}/', output_string, fontsize=12)
+    plot_auc_curves(sklearn_roc, auroc_outcomes, challenge_score, f'{"/".join(sys.argv[3].split("/")[:-1])}/', output_string, fontsize=12, split_string = sys.argv[3].split("split_")[-1].split("_")[0])
 
     # Plot decision threshold curve
-    decision_threshold_plot(true_labels=label_outcomes, prediction_probabilities=output_outcome_probabilities, output_directory=f'{"/".join(sys.argv[3].split("/")[:-1])}/')
+    decision_threshold_plot(true_labels=label_outcomes, prediction_probabilities=output_outcome_probabilities, output_directory=f'{"/".join(sys.argv[3].split("/")[:-1])}/', split_string = sys.argv[3].split("split_")[-1].split("_")[0])

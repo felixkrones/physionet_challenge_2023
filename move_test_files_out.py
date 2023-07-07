@@ -25,7 +25,7 @@ if __name__ == '__main__':
     source_dir = "/Users/felixkrones/python_projects/data/physionet_challenge_2023/physionet.org/files/i-care/2.0/training"
     target_dir = "/Users/felixkrones/python_projects/data/physionet_challenge_2023/physionet.org/files/i-care/2.0/testing"
     split_file = "/Users/felixkrones/python_projects/src/physionet_challenge_2023/data/splits.csv"
-    split_column = "split" # hospital
+    split_column = str(sys.argv[2]) # "split" "hospital"
     test_split = int(sys.argv[1])
 
     move_files(source_dir,target_dir,split_file,test_split)

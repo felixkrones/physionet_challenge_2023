@@ -12,6 +12,7 @@
 import os
 from helper_code import *
 import librosa
+import json
 import pandas as pd
 import numpy as np, os, sys
 import mne
@@ -44,10 +45,10 @@ import time
 #
 ################################################################################
 # Device settings
-PARAMS_DEVICE = {"num_workers": 0} #os.cpu_count()}
+PARAMS_DEVICE = {"num_workers": 1} #os.cpu_count()}
 print(f"CPU count: {os.cpu_count()}")
 print(PARAMS_DEVICE)
-USE_GPU = False
+USE_GPU = True
 
 # Recordings to use
 NUM_HOURS_TO_USE = -3 # This currently uses the recording files, not hours
@@ -78,7 +79,7 @@ USE_TORCH = True
 
 # Imputation
 IMPUTE = True
-IMPUTE_METHOD = 'mean' # 'mean', 'median', 'most_frequent', 'constant'
+IMPUTE_METHOD = 'constant' # 'mean', 'median', 'most_frequent', 'constant'
 IMPUTE_CONSTANT_VALUE = -1
 
 # Model and training paramters
@@ -96,6 +97,13 @@ PARAMS_XGB = {'max_depth': 8, 'eval_metric': 'auc', 'nthread': 8}
 
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose):
+    # Save all parameters as json file
+    params = {"PARAMS_DEVICE": PARAMS_DEVICE, "NUM_HOURS_TO_USE": NUM_HOURS_TO_USE, "EEG_CHANNELS": EEG_CHANNELS, "BIPOLAR_MONTAGES": BIPOLAR_MONTAGES, "NUM_HOURS_EEG": NUM_HOURS_EEG, "USE_ECG": USE_ECG, "ECG_CHANNELS": ECG_CHANNELS, "NUM_HOURS_ECG": NUM_HOURS_ECG, "USE_OTHER": USE_OTHER, "OTHER_CHANNELS": OTHER_CHANNELS, "NUM_HOURS_OTHER": NUM_HOURS_OTHER, "USE_REF": USE_REF, "REF_CHANNELS": REF_CHANNELS, "NUM_HOURS_REF": NUM_HOURS_REF, "USE_TORCH": USE_TORCH, "IMPUTE": IMPUTE, "IMPUTE_METHOD": IMPUTE_METHOD, "IMPUTE_CONSTANT_VALUE": IMPUTE_CONSTANT_VALUE, "PARAMS_TORCH": PARAMS_TORCH, "C_MODEL": C_MODEL, "PARAMS_RF": PARAMS_RF, "PARAMS_XGB": PARAMS_XGB}
+    if not os.path.exists(model_folder):
+        os.makedirs(model_folder)
+    with open(os.path.join(model_folder, "params.json"), "w") as f:
+        json.dump(params, f)
+
     # Parameters
     params_torch = PARAMS_TORCH
     c_model = C_MODEL
@@ -146,7 +154,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         num_val = int(num_patients * params_torch['val_size'])
         num_train = num_patients - num_val
         patient_ids_aux = patient_ids.copy()
-        random.shuffle(patient_ids_aux) #TO DO: Add back in
+        random.Random(42).shuffle(patient_ids_aux) #TODO: Is this good?
         train_ids = patient_ids_aux[:num_train]
         val_ids = patient_ids_aux[num_train:]
 
@@ -433,7 +441,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     feature_importance = 100.0 * (feature_importance / feature_importance.max())
     sorted_idx = np.argsort(feature_importance)
     pos = np.arange(sorted_idx.shape[0]) + .5
-    plt.figure(figsize=(12, len(feature_importance)/2))
+    plt.figure(figsize=(12, min(len(feature_importance)/2,100)))
     plt.barh(pos, feature_importance[sorted_idx], align='center')
     plt.yticks(pos, np.array(feature_names[0])[sorted_idx])
     plt.xlabel('Relative Importance')
@@ -704,7 +712,7 @@ def save_challenge_model(model_folder, imputer, outcome_model, cpc_model, **torc
 # Preprocess data.
 def preprocess_data(data, sampling_frequency, utility_frequency):
     # Define the bandpass frequencies.
-    passband = [0.1, 30.0]
+    passband = [0.5, 30.0]
 
     # Promote the data to double precision because these libraries expect double precision.
     data = np.asarray(data, dtype=np.float64)
@@ -799,12 +807,18 @@ def get_features(data_folder, patient_id, return_as_dict=False):
     if USE_ECG:
         recording_ids_ecg = find_recording_files(data_folder, patient_id, "ECG")
         use_last_hours_ecg, hours_ecg, start_ecg = get_correct_hours(NUM_HOURS_ECG)
+    else:
+        recording_ids_ecg = use_last_hours_ecg = hours_ecg = start_ecg = None
     if USE_REF:
         recording_ids_ref = find_recording_files(data_folder, patient_id, "REF")
         use_last_hours_ref, hours_ref, start_ref = get_correct_hours(NUM_HOURS_REF)
+    else:
+        recording_ids_ref = use_last_hours_ref = hours_ref = start_ref = None
     if USE_OTHER:
         recording_ids_other = find_recording_files(data_folder, patient_id, "OTHER")
         use_last_hours_other, hours_other, start_other = get_correct_hours(NUM_HOURS_OTHER)
+    else:
+        recording_ids_other = use_last_hours_other = hours_other = start_other = None
 
     # Extract patient features.
     patient_features, patient_feature_names = get_patient_features(patient_metadata, recording_ids_eeg)
@@ -868,7 +882,7 @@ def get_eeg_features(data, sampling_frequency):
     num_channels, num_samples = np.shape(data)
 
     if num_samples > 0:
-        delta_psd, _ = mne.time_frequency.psd_array_welch(data, sfreq=sampling_frequency,  fmin=0.5,  fmax=8.0, verbose=False)
+        delta_psd, _ = mne.time_frequency.psd_array_welch(data, sfreq=sampling_frequency,  fmin=0.5,  fmax=4.0, verbose=False)
         theta_psd, _ = mne.time_frequency.psd_array_welch(data, sfreq=sampling_frequency,  fmin=4.0,  fmax=8.0, verbose=False)
         alpha_psd, _ = mne.time_frequency.psd_array_welch(data, sfreq=sampling_frequency,  fmin=8.0, fmax=12.0, verbose=False)
         beta_psd,  _ = mne.time_frequency.psd_array_welch(data, sfreq=sampling_frequency, fmin=12.0, fmax=30.0, verbose=False)
