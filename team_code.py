@@ -52,6 +52,7 @@ USE_GPU = True
 
 # Recordings to use
 NUM_HOURS_TO_USE = -3 # This currently uses the recording files, not hours
+SECONDS_TO_IGNORE_AT_START_AND_END_OF_RECORDING = 180
 
 # EEG usage
 EEG_CHANNELS = ['Fp1', 'Fp2', 'F7', 'F8', 'F3', 'F4', 'T3', 'T4', 'C3', 'C4', 'T5', 'T6', 'P3', 'P4', 'O1', 'O2', 'Fz', 'Cz', 'Pz'] # ['F3', 'P3', 'F4', 'P4'] # ['Fp1', 'Fp2', 'F7', 'F8', 'F3', 'F4', 'T3', 'T4', 'C3', 'C4', 'T5', 'T6', 'P3', 'P4', 'O1', 'O2', 'Fz', 'Cz', 'Pz', 'Fpz', 'Oz', 'F9']
@@ -85,7 +86,7 @@ IMPUTE_CONSTANT_VALUE = -1
 # Model and training paramters
 PARAMS_TORCH = {'batch_size': 16, 'val_size': 0.3, 'max_epochs': 30, 'pretrained': True, 'devices': 1, 'num_nodes': 1}
 C_MODEL = "rf" # "xgb" or "rf
-PARAMS_RF = {'n_estimators': 123, 'max_depth': 8, 'max_leaf_nodes': None, 'random_state': 42, 'n_jobs': 8}
+PARAMS_RF = {'n_estimators': 100, 'max_depth': 8, 'max_leaf_nodes': None, 'random_state': 42, 'n_jobs': 8}
 PARAMS_XGB = {'max_depth': 8, 'eval_metric': 'auc', 'nthread': 8}
 
 
@@ -98,7 +99,7 @@ PARAMS_XGB = {'max_depth': 8, 'eval_metric': 'auc', 'nthread': 8}
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose):
     # Save all parameters as json file
-    params = {"PARAMS_DEVICE": PARAMS_DEVICE, "NUM_HOURS_TO_USE": NUM_HOURS_TO_USE, "EEG_CHANNELS": EEG_CHANNELS, "BIPOLAR_MONTAGES": BIPOLAR_MONTAGES, "NUM_HOURS_EEG": NUM_HOURS_EEG, "USE_ECG": USE_ECG, "ECG_CHANNELS": ECG_CHANNELS, "NUM_HOURS_ECG": NUM_HOURS_ECG, "USE_OTHER": USE_OTHER, "OTHER_CHANNELS": OTHER_CHANNELS, "NUM_HOURS_OTHER": NUM_HOURS_OTHER, "USE_REF": USE_REF, "REF_CHANNELS": REF_CHANNELS, "NUM_HOURS_REF": NUM_HOURS_REF, "USE_TORCH": USE_TORCH, "IMPUTE": IMPUTE, "IMPUTE_METHOD": IMPUTE_METHOD, "IMPUTE_CONSTANT_VALUE": IMPUTE_CONSTANT_VALUE, "PARAMS_TORCH": PARAMS_TORCH, "C_MODEL": C_MODEL, "PARAMS_RF": PARAMS_RF, "PARAMS_XGB": PARAMS_XGB}
+    params = {"PARAMS_DEVICE": PARAMS_DEVICE, "NUM_HOURS_TO_USE": NUM_HOURS_TO_USE, "SECONDS_TO_IGNORE_AT_START_AND_END_OF_RECORDING": SECONDS_TO_IGNORE_AT_START_AND_END_OF_RECORDING, "EEG_CHANNELS": EEG_CHANNELS, "BIPOLAR_MONTAGES": BIPOLAR_MONTAGES, "NUM_HOURS_EEG": NUM_HOURS_EEG, "USE_ECG": USE_ECG, "ECG_CHANNELS": ECG_CHANNELS, "NUM_HOURS_ECG": NUM_HOURS_ECG, "USE_OTHER": USE_OTHER, "OTHER_CHANNELS": OTHER_CHANNELS, "NUM_HOURS_OTHER": NUM_HOURS_OTHER, "USE_REF": USE_REF, "REF_CHANNELS": REF_CHANNELS, "NUM_HOURS_REF": NUM_HOURS_REF, "USE_TORCH": USE_TORCH, "IMPUTE": IMPUTE, "IMPUTE_METHOD": IMPUTE_METHOD, "IMPUTE_CONSTANT_VALUE": IMPUTE_CONSTANT_VALUE, "PARAMS_TORCH": PARAMS_TORCH, "C_MODEL": C_MODEL, "PARAMS_RF": PARAMS_RF, "PARAMS_XGB": PARAMS_XGB}
     if not os.path.exists(model_folder):
         os.makedirs(model_folder)
     with open(os.path.join(model_folder, "params.json"), "w") as f:
@@ -186,9 +187,9 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
         # Train EEG torch model
         print("Start training EEG torch model...")
-        start_time_torch = time.time()
+        start_time_torch_eeg = time.time()
         trainer_eeg.fit(torch_model_eeg, train_loader_eeg, val_loader_eeg, ckpt_path=checkpoint_path_eeg)
-        print(f"Finished training EEG torch model for {params_torch['max_epochs']} epochs after {round((time.time()-start_time_torch)/60,4)} min.")
+        print(f"Finished training EEG torch model for {params_torch['max_epochs']} epochs after {round((time.time()-start_time_torch_eeg)/60,4)} min.")
 
         # Get EEG predictions
         print("Start predicting EEG torch features ...")
@@ -706,6 +707,8 @@ def save_challenge_model(model_folder, imputer, outcome_model, cpc_model, **torc
     for name, torch_model in torch_models.items():
         if torch_model is not None:
             torch_model_folder = os.path.join(model_folder, name.split('_')[-1])
+            if not os.path.exists(torch_model_folder):
+                os.makedirs(torch_model_folder)
             file_path = os.path.join(torch_model_folder, 'checkpoint.pth')
             torch.save({"model": torch_model.state_dict()}, file_path)
 
@@ -742,6 +745,14 @@ def preprocess_data(data, sampling_frequency, utility_frequency):
         data = 2.0 / (max_value - min_value) * (data - 0.5 * (min_value + max_value))
     else:
         data = 0 * data
+
+    # Remove the first and last x seconds of the recording to avoid edge effects.
+    x = SECONDS_TO_IGNORE_AT_START_AND_END_OF_RECORDING
+    num_samples_to_remove = int(x * resampling_frequency)
+    if num_samples_to_remove > 0:
+        if data.shape[1] < 2 * num_samples_to_remove:
+            num_samples_to_remove = int(data.shape[1] / 2)
+    data = data[:, num_samples_to_remove:-num_samples_to_remove]
 
     return data, resampling_frequency
 
