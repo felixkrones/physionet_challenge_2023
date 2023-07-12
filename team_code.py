@@ -967,9 +967,11 @@ class RecordingsDataset(Dataset):
                 current_outcome = 0
             for recording_id in recording_ids:
                 if not is_nan(recording_id):
-                    recording_locations_list.append(os.path.join(data_folder, patient_id, '{}_{}'.format(recording_id, self.group)))
-                    patient_ids_list.append(patient_id)
-                    labels_list.append(current_outcome)
+                    recording_location_aux = os.path.join(data_folder, patient_id, '{}_{}'.format(recording_id, self.group))
+                    if os.path.exists(recording_location_aux + '.hea'):
+                        recording_locations_list.append(recording_location_aux)
+                        patient_ids_list.append(patient_id)
+                        labels_list.append(current_outcome)
     
         self.recording_locations = recording_locations_list
         self.patient_ids = patient_ids_list
@@ -982,7 +984,11 @@ class RecordingsDataset(Dataset):
 
     def __getitem__(self, idx):
         # Load the data.
-        signal_data, signal_channels, sampling_frequency = load_recording_data(self.recording_locations[idx])
+        try:
+            signal_data, signal_channels, sampling_frequency = load_recording_data(self.recording_locations[idx])
+        except Exception as e:
+            print("Error loading {}".format(self.recording_locations[idx]))
+            raise e
         hea_file = load_text_file(self.recording_locations[idx] + '.hea')
         utility_frequency = get_utility_frequency(hea_file)
         signal_data, signal_channels = reduce_channels(signal_data, signal_channels, self.channels_to_use)
