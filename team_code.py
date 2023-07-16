@@ -37,7 +37,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import time
-
+from typing import Dict
 
 ################################################################################
 #
@@ -53,6 +53,7 @@ USE_GPU = True
 # Recordings to use
 NUM_HOURS_TO_USE = -3 # This currently uses the recording files, not hours
 SECONDS_TO_IGNORE_AT_START_AND_END_OF_RECORDING = 180
+FILTER_SIGNALS = False
 
 # EEG usage
 EEG_CHANNELS = ['Fp1', 'Fp2', 'F7', 'F8', 'F3', 'F4', 'T3', 'T4', 'C3', 'C4', 'T5', 'T6', 'P3', 'P4', 'O1', 'O2', 'Fz', 'Cz', 'Pz'] # ['F3', 'P3', 'F4', 'P4'] # ['Fp1', 'Fp2', 'F7', 'F8', 'F3', 'F4', 'T3', 'T4', 'C3', 'C4', 'T5', 'T6', 'P3', 'P4', 'O1', 'O2', 'Fz', 'Cz', 'Pz', 'Fpz', 'Oz', 'F9']
@@ -84,7 +85,7 @@ IMPUTE_METHOD = 'constant' # 'mean', 'median', 'most_frequent', 'constant'
 IMPUTE_CONSTANT_VALUE = -1
 
 # Model and training paramters
-PARAMS_TORCH = {'batch_size': 16, 'val_size': 0.3, 'max_epochs': 30, 'pretrained': True, 'devices': 1, 'num_nodes': 1}
+PARAMS_TORCH = {'batch_size': 16, 'val_size': 0.3, 'max_epochs': 20, 'pretrained': True, 'devices': 1, 'num_nodes': 1}
 C_MODEL = "rf" # "xgb" or "rf
 PARAMS_RF = {'n_estimators': 100, 'max_depth': 8, 'max_leaf_nodes': None, 'random_state': 42, 'n_jobs': 8}
 PARAMS_XGB = {'max_depth': 8, 'eval_metric': 'auc', 'nthread': 8}
@@ -160,8 +161,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
         val_ids = patient_ids_aux[num_train:]
 
         # Get EEG DL data
-        train_dataset_eeg = RecordingsDataset(data_folder, patient_ids = train_ids, device=device, group = "EEG", hours_to_use=NUM_HOURS_EEG)
-        val_dataset_eeg = RecordingsDataset(data_folder, patient_ids = val_ids, device=device, group = "EEG", hours_to_use=NUM_HOURS_EEG)
+        train_dataset_eeg = RecordingsDataset(data_folder, patient_ids = train_ids, device=device, group = "EEG", hours_to_use=None)
+        val_dataset_eeg = RecordingsDataset(data_folder, patient_ids = val_ids, device=device, group = "EEG", hours_to_use=None)
         torch_dataset_eeg = RecordingsDataset(data_folder, patient_ids = patient_ids, device=device, group = "EEG", hours_to_use=NUM_HOURS_EEG)
         train_loader_eeg = DataLoader(train_dataset_eeg, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=True, pin_memory=True)
         val_loader_eeg = DataLoader(val_dataset_eeg, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=False, pin_memory=True)
@@ -198,8 +199,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
         if USE_ECG:
             # Get ECG DL data
-            train_dataset_ecg = RecordingsDataset(data_folder, patient_ids = train_ids, device=device, group = "ECG", hours_to_use=NUM_HOURS_ECG)
-            val_dataset_ecg = RecordingsDataset(data_folder, patient_ids = val_ids, device=device, group = "ECG", hours_to_use=NUM_HOURS_ECG)
+            train_dataset_ecg = RecordingsDataset(data_folder, patient_ids = train_ids, device=device, group = "ECG", hours_to_use=None)
+            val_dataset_ecg = RecordingsDataset(data_folder, patient_ids = val_ids, device=device, group = "ECG", hours_to_use=None)
             torch_dataset_ecg = RecordingsDataset(data_folder, patient_ids = patient_ids, device=device, group = "ECG", hours_to_use=NUM_HOURS_ECG)
             train_loader_ecg = DataLoader(train_dataset_ecg, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=True, pin_memory=True)
             val_loader_ecg = DataLoader(val_dataset_ecg, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=False, pin_memory=True)
@@ -237,8 +238,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
         if USE_REF:
             # Get REF DL data
-            train_dataset_ref = RecordingsDataset(data_folder, patient_ids = train_ids, device=device, group = "REF", hours_to_use=NUM_HOURS_REF)
-            val_dataset_ref = RecordingsDataset(data_folder, patient_ids = val_ids, device=device, group = "REF", hours_to_use=NUM_HOURS_REF)
+            train_dataset_ref = RecordingsDataset(data_folder, patient_ids = train_ids, device=device, group = "REF", hours_to_use=None)
+            val_dataset_ref = RecordingsDataset(data_folder, patient_ids = val_ids, device=device, group = "REF", hours_to_use=None)
             torch_dataset_ref = RecordingsDataset(data_folder, patient_ids = patient_ids, device=device, group = "REF", hours_to_use=NUM_HOURS_REF)
             train_loader_ref = DataLoader(train_dataset_ref, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=True, pin_memory=True)
             val_loader_ref = DataLoader(val_dataset_ref, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=False, pin_memory=True)
@@ -276,8 +277,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
         if USE_OTHER:
             # Get OTHER DL data
-            train_dataset_other = RecordingsDataset(data_folder, patient_ids = train_ids, device=device, group = "OTHER", hours_to_use=NUM_HOURS_OTHER)
-            val_dataset_other = RecordingsDataset(data_folder, patient_ids = val_ids, device=device, group = "OTHER", hours_to_use=NUM_HOURS_OTHER)
+            train_dataset_other = RecordingsDataset(data_folder, patient_ids = train_ids, device=device, group = "OTHER", hours_to_use=None)
+            val_dataset_other = RecordingsDataset(data_folder, patient_ids = val_ids, device=device, group = "OTHER", hours_to_use=None)
             torch_dataset_other = RecordingsDataset(data_folder, patient_ids = patient_ids, device=device, group = "OTHER", hours_to_use=NUM_HOURS_OTHER)
             train_loader_other = DataLoader(train_dataset_other, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=True, pin_memory=True)
             val_loader_other = DataLoader(val_dataset_other, batch_size=params_torch['batch_size'], num_workers=PARAMS_DEVICE["num_workers"], shuffle=False, pin_memory=True)
@@ -747,12 +748,10 @@ def preprocess_data(data, sampling_frequency, utility_frequency):
         data = 0 * data
 
     # Remove the first and last x seconds of the recording to avoid edge effects.
-    x = SECONDS_TO_IGNORE_AT_START_AND_END_OF_RECORDING
-    num_samples_to_remove = int(x * resampling_frequency)
+    num_samples_to_remove = int(SECONDS_TO_IGNORE_AT_START_AND_END_OF_RECORDING * resampling_frequency)
     if num_samples_to_remove > 0:
-        if data.shape[1] < 2 * num_samples_to_remove:
-            num_samples_to_remove = int(data.shape[1] / 2)
-    data = data[:, num_samples_to_remove:-num_samples_to_remove]
+        if data.shape[1] > (2 * num_samples_to_remove + resampling_frequency * 60 * 5):
+            data = data[:, num_samples_to_remove:-num_samples_to_remove]
 
     return data, resampling_frequency
 
@@ -777,7 +776,7 @@ def get_recording_features(recording_ids, recording_id_to_use, data_folder, pati
             recording_id = recording_ids[recording_id_to_use]
             recording_location = os.path.join(data_folder, patient_id, '{}_{}'.format(recording_id, group))
             if os.path.exists(recording_location + '.hea'):
-                data, channels, sampling_frequency = load_recording_data(recording_location)
+                data, channels, sampling_frequency = load_recording_data_wrapper(recording_location)
                 hea_file = load_text_file(recording_location + '.hea')
                 utility_frequency = get_utility_frequency(hea_file)
                 quality = get_quality(hea_file)
@@ -985,7 +984,7 @@ class RecordingsDataset(Dataset):
     def __getitem__(self, idx):
         # Load the data.
         try:
-            signal_data, signal_channels, sampling_frequency = load_recording_data(self.recording_locations[idx])
+            signal_data, signal_channels, sampling_frequency = load_recording_data_wrapper(self.recording_locations[idx])
         except Exception as e:
             print("Error loading {}".format(self.recording_locations[idx]))
             raise e
@@ -1250,3 +1249,160 @@ def process_feature(feature_type, start, hours, use_last_hours, recording_ids, c
             feature_data[item].append(locals()[item.split('_', 1)[-1]])
 
     return feature_data
+
+
+import numpy as np
+from typing import List
+
+
+def check_artifacts(epoch: np.ndarray, low_threshold: float=-250, high_threshold: float=250) -> bool:
+    """
+    Checks an EEG epoch for artifacts.
+    
+    Parameters
+    ----------
+    epoch: np.ndarray
+        The EEG signal epoch as a 1D numpy array.
+    low_threshold: float
+        The lower limit for detecting extreme values.
+    high_threshold: float
+        The upper limit for detecting extreme values.
+    
+    Returns
+    -------
+    bool
+        True if any type of artifact is detected, False otherwise.
+    """
+    # Flat signal
+    if np.all(epoch == epoch[0]):
+        return True
+    
+    # Extreme high or low values
+    if np.max(epoch) > high_threshold or np.min(epoch) < low_threshold:
+        return True
+    
+    # Muscle artifact (Assuming if the standard deviation of an epoch is high, it might be a muscle artifact)
+    #if abs(np.std(epoch)) > 10 * abs(np.mean(epoch)):
+    #    return True
+    
+    # Fast rising or decreasing signal amplitude (If the absolute difference between any two consecutive samples is above a threshold)
+    #if np.any(np.abs(np.diff(epoch)) > 10 * np.mean(np.abs(np.diff(epoch)))):
+    #    return True
+
+    return False
+
+
+def compute_score(signal: np.ndarray, signal_frequency: float, epoch_size: int, window_size: int, 
+                  stride_length: int, high_threshold: float = None, low_threshold: float = None) -> Dict[int, float]:
+    """
+    Computes a score for each window in the EEG signal.
+    
+    Parameters
+    ----------
+    signal: np.ndarray
+        The EEG signal as a 2D numpy array of shape (channel, num_observations).
+    signal_frequency: float
+        The frequency of the signal in Hz.
+    epoch_size: int
+        The size of each epoch in seconds.
+    window_size: int
+        The size of each window in minutes.
+    stride_length: int
+        The stride length in minutes for moving the window.
+    high_threshold: float
+        The upper limit for detecting extreme values.
+    low_threshold: float
+        The lower limit for detecting extreme values.
+    
+    Returns
+    -------
+    Dict[int, float]
+        A dictionary where keys are the starting time (in seconds) of each window and values are the corresponding scores.
+    """
+    num_channels, num_observations = signal.shape
+    epoch_samples = int(signal_frequency * epoch_size)
+    window_samples = int(signal_frequency * window_size * 60)
+    stride_samples = int(signal_frequency * stride_length * 60)
+    scores = {}
+    for start in range(0, num_observations - window_samples + 1, stride_samples):
+        window = signal[:, start : start + window_samples]
+        artifact_epochs = 0
+        total_epochs = 0
+        for epoch_start in range(0, window_samples - epoch_samples + 1, epoch_samples):
+            for channel in range(num_channels):
+                epoch = window[channel, epoch_start : epoch_start + epoch_samples]
+                if check_artifacts(epoch):
+                    artifact_epochs += 1
+                    break  # if any channel in the epoch has artifact, consider the whole epoch contaminated
+            total_epochs += 1
+        score = 1 - artifact_epochs / total_epochs
+        # Converting start sample index to time in seconds
+        start_time = start / signal_frequency
+        scores[start_time] = score
+    return scores
+
+
+def keep_best_window(signal: np.ndarray, scores: Dict[int, float], signal_frequency: float, window_size: int) -> np.ndarray:
+    """
+    Keep only the window with the best score in the EEG signal and set all other samples to NaN.
+    
+    Parameters
+    ----------
+    signal: np.ndarray
+        The EEG signal as a 2D numpy array of shape (channel, num_observations).
+    scores: Dict[int, float]
+        A dictionary where keys are the starting time (in seconds) of each window and values are the corresponding scores.
+    signal_frequency: float
+        The frequency of the signal in Hz.
+    window_size: int
+        The size of each window in minutes.
+    
+    Returns
+    -------
+    np.ndarray
+        The EEG signal where only the window with the best score is kept and all other samples are set to NaN.
+    """
+    num_channels, num_observations = signal.shape
+    window_samples = int(signal_frequency * window_size * 60)
+    
+    # Find the window with the best score
+    best_start_time = max(scores, key=scores.get)
+    best_start_sample = int(best_start_time * signal_frequency)
+    
+    # Create a new signal array filled with NaN
+    #new_signal = np.full((num_channels, num_observations), np.nan)
+    
+    # Keep only the window with the best score
+    #new_signal[:, best_start_sample : best_start_sample + window_samples] = signal[:, best_start_sample : best_start_sample + window_samples]
+
+    new_signal = signal[:, best_start_sample : best_start_sample + window_samples]
+    
+    return new_signal
+
+
+def load_recording_data_wrapper(record_name):
+    """
+    Loads the EEG signal of a recording and applies artifact removal.
+    """
+
+    window_size = 5 # minutes
+    stride_length = 1 # minutes
+    epoch_size = 10 # seconds
+
+    signal_data, signal_channels, sampling_frequency = load_recording_data(record_name)
+
+    if FILTER_SIGNALS:
+        scores = compute_score(signal_data, signal_frequency=sampling_frequency, epoch_size=epoch_size, window_size=window_size, stride_length=stride_length)
+        signal_data_filtered = keep_best_window(signal=signal_data, scores=scores, signal_frequency=sampling_frequency, window_size=window_size)
+        signal_return = signal_data_filtered
+
+        # Save the signal, scores and filtered signal of the first channel as pandas dataframes
+        df_signal = pd.DataFrame(signal_data[0])
+        df_signal.columns = ['signal']
+        df_signal['time'] = df_signal.index / sampling_frequency
+        df_signal['score'] = df_signal['time'].apply(lambda x: scores.get(x, np.nan))
+        #df_signal.to_csv(f'./data/01_intermediate_analysis/{record_name.split("/")[-1]}.csv', index=False)
+    else:
+        signal_return = signal_data
+
+    return signal_return, signal_channels, sampling_frequency
