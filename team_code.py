@@ -39,20 +39,27 @@ import matplotlib.pyplot as plt
 import time
 from typing import Dict
 
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+
 ################################################################################
 #
 # Parameters
 #
 ################################################################################
 # Device settings
-PARAMS_DEVICE = {"num_workers": 1} #os.cpu_count()}
+PARAMS_DEVICE = {"num_workers": 10} #os.cpu_count()}
 print(f"CPU count: {os.cpu_count()}")
 print(PARAMS_DEVICE)
 USE_GPU = True
 
+# Torch usage
+USE_TORCH = False
+
 # Recordings to use
-NUM_HOURS_TO_USE = -3 # This currently uses the recording files, not hours
-SECONDS_TO_IGNORE_AT_START_AND_END_OF_RECORDING = 180
+NUM_HOURS_TO_USE = -1 # This currently uses the recording files, not hours
+SECONDS_TO_IGNORE_AT_START_AND_END_OF_RECORDING = 120
 FILTER_SIGNALS = False
 
 # EEG usage
@@ -75,17 +82,13 @@ USE_REF = False
 REF_CHANNELS = ['RAT1', 'RAT2', 'REF', 'C2', 'A1', 'A2', 'BIP1', 'BIP2', 'BIP3', 'BIP4', 'Cb2', 'M1', 'M2', 'In1-Ref2', 'In1-Ref3']
 NUM_HOURS_REF = NUM_HOURS_TO_USE
 
-# Torch usage
-USE_TORCH = True
-# USE_TORCH_FOR_FINAL_PREDICTION = True #TODO: Implement
-
 # Imputation
 IMPUTE = True
 IMPUTE_METHOD = 'constant' # 'mean', 'median', 'most_frequent', 'constant'
 IMPUTE_CONSTANT_VALUE = -1
 
 # Model and training paramters
-PARAMS_TORCH = {'batch_size': 16, 'val_size': 0.3, 'max_epochs': 20, 'pretrained': True, 'devices': 1, 'num_nodes': 1}
+PARAMS_TORCH = {'batch_size': 16, 'val_size': 0.3, 'max_epochs': 1, 'pretrained': True, 'devices': 1, 'num_nodes': 1}
 C_MODEL = "rf" # "xgb" or "rf
 PARAMS_RF = {'n_estimators': 100, 'max_depth': 8, 'max_leaf_nodes': None, 'random_state': 42, 'n_jobs': 8}
 PARAMS_XGB = {'max_depth': 8, 'eval_metric': 'auc', 'nthread': 8}
