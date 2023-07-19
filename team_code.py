@@ -49,7 +49,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 #
 ################################################################################
 # Device settings
-PARAMS_DEVICE = {"num_workers": 10} #os.cpu_count()}
+PARAMS_DEVICE = {"num_workers": 0} #os.cpu_count()}
 print(f"CPU count: {os.cpu_count()}")
 print(PARAMS_DEVICE)
 USE_GPU = True
@@ -58,9 +58,14 @@ USE_GPU = True
 USE_TORCH = False
 
 # Recordings to use
-NUM_HOURS_TO_USE = -1 # This currently uses the recording files, not hours
+NUM_HOURS_TO_USE = -3 # This currently uses the recording files, not hours
 SECONDS_TO_IGNORE_AT_START_AND_END_OF_RECORDING = 120
 FILTER_SIGNALS = False
+
+# Imputation
+IMPUTE = True
+IMPUTE_METHOD = 'constant' # 'mean', 'median', 'most_frequent', 'constant'
+IMPUTE_CONSTANT_VALUE = -1
 
 # EEG usage
 EEG_CHANNELS = ['Fp1', 'Fp2', 'F7', 'F8', 'F3', 'F4', 'T3', 'T4', 'C3', 'C4', 'T5', 'T6', 'P3', 'P4', 'O1', 'O2', 'Fz', 'Cz', 'Pz'] # ['F3', 'P3', 'F4', 'P4'] # ['Fp1', 'Fp2', 'F7', 'F8', 'F3', 'F4', 'T3', 'T4', 'C3', 'C4', 'T5', 'T6', 'P3', 'P4', 'O1', 'O2', 'Fz', 'Cz', 'Pz', 'Fpz', 'Oz', 'F9']
@@ -81,11 +86,6 @@ NUM_HOURS_OTHER = NUM_HOURS_TO_USE
 USE_REF = False
 REF_CHANNELS = ['RAT1', 'RAT2', 'REF', 'C2', 'A1', 'A2', 'BIP1', 'BIP2', 'BIP3', 'BIP4', 'Cb2', 'M1', 'M2', 'In1-Ref2', 'In1-Ref3']
 NUM_HOURS_REF = NUM_HOURS_TO_USE
-
-# Imputation
-IMPUTE = True
-IMPUTE_METHOD = 'constant' # 'mean', 'median', 'most_frequent', 'constant'
-IMPUTE_CONSTANT_VALUE = -1
 
 # Model and training paramters
 PARAMS_TORCH = {'batch_size': 16, 'val_size': 0.3, 'max_epochs': 1, 'pretrained': True, 'devices': 1, 'num_nodes': 1}
@@ -1258,7 +1258,7 @@ import numpy as np
 from typing import List
 
 
-def check_artifacts(epoch: np.ndarray, low_threshold: float=-250, high_threshold: float=250) -> bool:
+def check_artifacts(epoch: np.ndarray, low_threshold: float=-300, high_threshold: float=300) -> bool:
     """
     Checks an EEG epoch for artifacts.
     
