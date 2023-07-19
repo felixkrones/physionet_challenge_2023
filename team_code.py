@@ -883,7 +883,10 @@ def get_patient_features(data, recording_ids_eeg):
         male   = 0
         other  = 1
 
-    last_eeg_hour = np.max([int(r.split("_")[-1]) for r in recording_ids_eeg])
+    if len(recording_ids_eeg) > 0:
+        last_eeg_hour = np.max([int(r.split("_")[-1]) for r in recording_ids_eeg])
+    else:
+        last_eeg_hour = np.nan
 
     features = np.array((age, female, male, other, rosc, ohca, shockable_rhythm, ttm, last_eeg_hour))
     feature_names = ["age", "female", "male", "other", "rosc", "ohca", "shockable_rhythm", "ttm", "last_eeg_hour"]
