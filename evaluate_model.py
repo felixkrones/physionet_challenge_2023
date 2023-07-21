@@ -459,7 +459,16 @@ def plot_auc_curves(sklearn_roc, auroc_outcomes, challenge_score, roc_path, outp
     plt.title(f'ROC Curve (split {split_string}), AUC = {round(auroc_outcomes,3)}, score = {round(challenge_score,3)}', fontsize=fontsize*1.2)
     plt.xticks(fontsize=fontsize*0.9)
     plt.yticks(fontsize=fontsize*0.9)
-    plt.savefig(os.path.join(roc_path,f"split_{split_string}_roc_curve.png"))
+    if "/" in split_string:
+        split_string = ""
+    try:
+        plt.savefig(os.path.join(roc_path,f"split_{split_string}_roc_curve.png"))
+    except Exception as e:
+        print("Could not save ROC curve")
+        print(f"roc_path: {roc_path}")
+        print(f"split_string: {split_string}")
+        print(f"split_{split_string}_roc_curve.png")
+        raise e
 
     # Output the scores to screen and/or a file.
     if len(sys.argv) == 3:
@@ -524,3 +533,5 @@ if __name__ == '__main__':
 
     # Plot decision threshold curve
     decision_threshold_plot(true_labels=label_outcomes, prediction_probabilities=output_outcome_probabilities, output_directory=f'{"/".join(sys.argv[3].split("/")[:-1])}/', split_string = sys.argv[3].split("split_")[-1].split("_")[0])
+
+    print("----- All done. -----")

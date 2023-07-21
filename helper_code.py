@@ -91,6 +91,8 @@ def load_recording_data(record_name, check_values=False):
     # simplicity, we have not done that here.
     num_signal_files = len(set(signal_files))
     if num_signal_files!=1:
+        print(header)
+        print(signal_files)
         raise NotImplementedError('The header file {}'.format(header_file) \
             + ' references {} signal files; one signal file expected.'.format(num_signal_files))
 

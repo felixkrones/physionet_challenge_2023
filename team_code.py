@@ -55,7 +55,7 @@ print(PARAMS_DEVICE)
 USE_GPU = True
 
 # Torch usage
-USE_TORCH = False
+USE_TORCH = True
 
 # Recordings to use
 NUM_HOURS_TO_USE = -3 # This currently uses the recording files, not hours
@@ -88,7 +88,7 @@ REF_CHANNELS = ['RAT1', 'RAT2', 'REF', 'C2', 'A1', 'A2', 'BIP1', 'BIP2', 'BIP3',
 NUM_HOURS_REF = NUM_HOURS_TO_USE
 
 # Model and training paramters
-PARAMS_TORCH = {'batch_size': 16, 'val_size': 0.3, 'max_epochs': 1, 'pretrained': True, 'devices': 1, 'num_nodes': 1}
+PARAMS_TORCH = {'batch_size': 16, 'val_size': 0.3, 'max_epochs': 2, 'pretrained': True, 'devices': 1, 'num_nodes': 1}
 C_MODEL = "rf" # "xgb" or "rf
 PARAMS_RF = {'n_estimators': 100, 'max_depth': 8, 'max_leaf_nodes': None, 'random_state': 42, 'n_jobs': 8}
 PARAMS_XGB = {'max_depth': 8, 'eval_metric': 'auc', 'nthread': 8}
@@ -750,12 +750,6 @@ def preprocess_data(data, sampling_frequency, utility_frequency):
     else:
         data = 0 * data
 
-    # Remove the first and last x seconds of the recording to avoid edge effects.
-    num_samples_to_remove = int(SECONDS_TO_IGNORE_AT_START_AND_END_OF_RECORDING * resampling_frequency)
-    if num_samples_to_remove > 0:
-        if data.shape[1] > (2 * num_samples_to_remove + resampling_frequency * 60 * 5):
-            data = data[:, num_samples_to_remove:-num_samples_to_remove]
-
     return data, resampling_frequency
 
 # Load recording data.
@@ -1330,6 +1324,10 @@ def compute_score(signal: np.ndarray, signal_frequency: float, epoch_size: int, 
     window_samples = int(signal_frequency * window_size * 60)
     stride_samples = int(signal_frequency * stride_length * 60)
     scores = {}
+    if window_samples > num_observations:
+        window_samples = num_observations
+    if stride_samples > num_observations:
+        stride_samples = num_observations
     for start in range(0, num_observations - window_samples + 1, stride_samples):
         window = signal[:, start : start + window_samples]
         artifact_epochs = 0
@@ -1371,8 +1369,11 @@ def keep_best_window(signal: np.ndarray, scores: Dict[int, float], signal_freque
     num_channels, num_observations = signal.shape
     window_samples = int(signal_frequency * window_size * 60)
     
-    # Find the window with the best score
-    best_start_time = max(scores, key=scores.get)
+    # Find the window with the best score, but if all scores are 0, use the middle window
+    if all(score == 0 for score in scores.values()):
+        best_start_time = list(scores.keys())[int(len(scores) / 2)]
+    else:
+        best_start_time = max(scores, key=scores.get)
     best_start_sample = int(best_start_time * signal_frequency)
     
     # Create a new signal array filled with NaN
@@ -1381,7 +1382,10 @@ def keep_best_window(signal: np.ndarray, scores: Dict[int, float], signal_freque
     # Keep only the window with the best score
     #new_signal[:, best_start_sample : best_start_sample + window_samples] = signal[:, best_start_sample : best_start_sample + window_samples]
 
-    new_signal = signal[:, best_start_sample : best_start_sample + window_samples]
+    if best_start_sample + window_samples > num_observations:
+        new_signal = signal[:, best_start_sample:]
+    else:
+        new_signal = signal[:, best_start_sample : best_start_sample + window_samples]
     
     return new_signal
 
@@ -1396,6 +1400,12 @@ def load_recording_data_wrapper(record_name):
     epoch_size = 10 # seconds
 
     signal_data, signal_channels, sampling_frequency = load_recording_data(record_name)
+
+    # Remove the first and last x seconds of the recording to avoid edge effects.
+    num_samples_to_remove = int(SECONDS_TO_IGNORE_AT_START_AND_END_OF_RECORDING * sampling_frequency)
+    if num_samples_to_remove > 0:
+        if signal_data.shape[1] > (2 * num_samples_to_remove + sampling_frequency * 60 * 5):
+            signal_data = signal_data[:, num_samples_to_remove:-num_samples_to_remove]
 
     if FILTER_SIGNALS:
         scores = compute_score(signal_data, signal_frequency=sampling_frequency, epoch_size=epoch_size, window_size=window_size, stride_length=stride_length)
