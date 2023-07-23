@@ -53,7 +53,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 # Recordings to use
 MIN_SIGNAL_LENGTH = 600  # seconds  # Minimum length of a signal to consider it
 SECONDS_TO_IGNORE_AT_START_AND_END_OF_RECORDING = 120
-NUM_HOURS_TO_USE = -1  # This currently uses the recording files, not hours
+NUM_HOURS_TO_USE = -24  # This currently uses the recording files, not hours
 
 # Filters
 FILTER_SIGNALS = True
@@ -73,7 +73,7 @@ LIM_HOURS_DURING_TRAINING = True  # If this is true, only the first NUM_HOURS_TO
 PARAMS_TORCH = {
     "batch_size": 16,
     "val_size": 0.3,
-    "max_epochs": 1,
+    "max_epochs": 20,
     "pretrained": True,
     "learning_rate": 0.00005,
 }
