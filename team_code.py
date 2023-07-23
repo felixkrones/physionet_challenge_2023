@@ -61,7 +61,9 @@ NO_CHANNELS_W_ARTIFACT_TO_DISCARD_EPOCH = 2  # Allowed number of channels with a
 NO_CHANNELS_W_ARTIFACT_TO_DISCARD_WINDOW = 4  # Allowed number of channels with artifacts in a window to still count the window as good and replace the channels with artifacts by a random other channel
 WINDOW_SIZE_FILTER = 5  # minutes   # Window size to keep from each signal (if signal is shorter, the whole signal is kept)
 STRIDE_SIZE_FILTER = 1  # minutes   # Stride size for windowing
-EPOCH_SIZE_FILTER = 10  # seconds   # Epoch size to use for artifact detection within a window
+EPOCH_SIZE_FILTER = (
+    10  # seconds   # Epoch size to use for artifact detection within a window
+)
 LOW_THRESHOLD = -300
 HIGH_THRESHOLD = 300
 
@@ -1516,27 +1518,20 @@ def get_features(data_folder, patient_id, return_as_dict=False):
     patient_metadata = load_challenge_data(data_folder, patient_id)
     recording_ids_eeg = find_recording_files(data_folder, patient_id, "EEG")
     use_last_hours_eeg, hours_eeg, start_eeg = get_correct_hours(NUM_HOURS_EEG)
-    if USE_ECG:
-        recording_ids_ecg = find_recording_files(data_folder, patient_id, "ECG")
-        use_last_hours_ecg, hours_ecg, start_ecg = get_correct_hours(NUM_HOURS_ECG)
-    else:
-        recording_ids_ecg = use_last_hours_ecg = hours_ecg = start_ecg = None
-    if USE_REF:
-        recording_ids_ref = find_recording_files(data_folder, patient_id, "REF")
-        use_last_hours_ref, hours_ref, start_ref = get_correct_hours(NUM_HOURS_REF)
-    else:
-        recording_ids_ref = use_last_hours_ref = hours_ref = start_ref = None
-    if USE_OTHER:
-        recording_ids_other = find_recording_files(data_folder, patient_id, "OTHER")
-        use_last_hours_other, hours_other, start_other = get_correct_hours(
-            NUM_HOURS_OTHER
-        )
-    else:
-        recording_ids_other = use_last_hours_other = hours_other = start_other = None
+    recording_ids_ecg = find_recording_files(data_folder, patient_id, "ECG")
+    use_last_hours_ecg, hours_ecg, start_ecg = get_correct_hours(NUM_HOURS_ECG)
+    recording_ids_ref = find_recording_files(data_folder, patient_id, "REF")
+    use_last_hours_ref, hours_ref, start_ref = get_correct_hours(NUM_HOURS_REF)
+    recording_ids_other = find_recording_files(data_folder, patient_id, "OTHER")
+    use_last_hours_other, hours_other, start_other = get_correct_hours(NUM_HOURS_OTHER)
 
     # Extract patient features.
     patient_features, patient_feature_names = get_patient_features(
-        patient_metadata, recording_ids_eeg
+        patient_metadata,
+        recording_ids_eeg,
+        recording_ids_ecg,
+        recording_ids_ref,
+        recording_ids_other,
     )
     hospital = get_hospital(patient_metadata)
 
@@ -1601,7 +1596,9 @@ def get_features(data_folder, patient_id, return_as_dict=False):
 
 
 # Extract patient features from the data.
-def get_patient_features(data, recording_ids_eeg):
+def get_patient_features(
+    data, recording_ids_eeg, recording_ids_ecg, recording_ids_ref, recording_ids_other
+):
     age = get_age(data)
     sex = get_sex(data)
     rosc = get_rosc(data)
@@ -1628,8 +1625,27 @@ def get_patient_features(data, recording_ids_eeg):
     else:
         last_eeg_hour = np.nan
 
+    # Get binary features wheather the different signals are available.
+    eeg_available = 1 if len(recording_ids_eeg) > 0 else 0
+    ecg_available = 1 if len(recording_ids_ecg) > 0 else 0
+    ref_available = 1 if len(recording_ids_ref) > 0 else 0
+    other_available = 1 if len(recording_ids_other) > 0 else 0
+
     features = np.array(
-        (age, female, male, other, rosc, ohca, shockable_rhythm, ttm, last_eeg_hour)
+        (
+            age,
+            female,
+            male,
+            other,
+            rosc,
+            ohca,
+            shockable_rhythm,
+            ttm,
+            last_eeg_hour,
+            ecg_available,
+            ref_available,
+            other_available,
+        )
     )
     feature_names = [
         "age",
@@ -1641,6 +1657,9 @@ def get_patient_features(data, recording_ids_eeg):
         "shockable_rhythm",
         "ttm",
         "last_eeg_hour",
+        "ecg_available",
+        "ref_available",
+        "other_available",
     ]
 
     return features, feature_names
