@@ -68,7 +68,7 @@ HIGH_THRESHOLD = 300
 # Torch settings
 USE_TORCH = True
 USE_GPU = True
-PARAMS_DEVICE = {"num_workers": os.cpu_count() - 2}  # os.cpu_count()}
+PARAMS_DEVICE = {"num_workers": min(26, os.cpu_count() - 2)}  # os.cpu_count()}
 LIM_HOURS_DURING_TRAINING = True  # If this is true, only the first NUM_HOURS_TO_USE hours are used for training torch
 PARAMS_TORCH = {
     "batch_size": 16,
