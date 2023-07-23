@@ -22,11 +22,11 @@ def move_files(source_dir,target_dir,split_file,test_split):
 if __name__ == '__main__':
     print("------------- move_test_files_out.py -------------")
 
-    source_dir = "/Users/felixkrones/python_projects/data/physionet_challenge_2023/physionet.org/files/i-care/2.0/training" #"/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/physionet.org/files/i-care/2.0/training"
-    target_dir = "/Users/felixkrones/python_projects/data/physionet_challenge_2023/physionet.org/files/i-care/2.0/testing" #"/data/inet-multimodal-ai/wolf6245/data/physionet_challenge_2023/physionet.org/files/i-care/2.0/testing"
-    split_file = "/Users/felixkrones/python_projects/src/physionet_challenge_2023/data/splits.csv" #"/data/inet-multimodal-ai/wolf6245/src/physionet_challenge_2023/data/splits.csv"
+    root = str(sys.argv[3])
+    source_dir = f"{root}/physionet_challenge_2023/physionet.org/files/i-care/2.0/training"
+    target_dir = f"{root}/physionet_challenge_2023/physionet.org/files/i-care/2.0/testing"
+    split_file = "data/splits.csv"
     split_column = str(sys.argv[2]) # "split" "hospital"
     test_split = int(sys.argv[1])
 
     move_files(source_dir,target_dir,split_file,test_split)
-

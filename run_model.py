@@ -11,6 +11,7 @@
 
 import numpy as np, scipy as sp, os, sys
 from tqdm import tqdm
+import time
 from helper_code import *
 from team_code import load_challenge_models, run_challenge_models
 
@@ -69,6 +70,8 @@ def run_model(model_folder, data_folder, output_folder, allow_failures, verbose)
 
 if __name__ == '__main__':
     print("------------- run_model.py -------------")
+    start_time_run_model = time.time()
+
     # Parse the arguments.
     if not (len(sys.argv) == 4 or len(sys.argv) == 5):
         raise Exception('Include the model, data, and output folders as arguments, e.g., python run_model.py model data outputs.')
@@ -88,3 +91,5 @@ if __name__ == '__main__':
         verbose = 1
 
     run_model(model_folder, data_folder, output_folder, allow_failures, verbose)
+
+    print(f"Finished running run_model.py in {round((time.time() - start_time_run_model)/60, 2)} minutes.")

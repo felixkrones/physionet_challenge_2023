@@ -53,7 +53,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 # Recordings to use
 MIN_SIGNAL_LENGTH = 600  # seconds  # Minimum length of a signal to consider it
 SECONDS_TO_IGNORE_AT_START_AND_END_OF_RECORDING = 120
-NUM_HOURS_TO_USE = -24  # This currently uses the recording files, not hours
+NUM_HOURS_TO_USE = -1  # This currently uses the recording files, not hours
 
 # Filters
 FILTER_SIGNALS = True
@@ -73,7 +73,7 @@ LIM_HOURS_DURING_TRAINING = True  # If this is true, only the first NUM_HOURS_TO
 PARAMS_TORCH = {
     "batch_size": 16,
     "val_size": 0.3,
-    "max_epochs": 20,
+    "max_epochs": 1,
     "pretrained": True,
     "learning_rate": 0.00005,
 }
@@ -349,7 +349,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             checkpoint_path=checkpoint_path_eeg,
         )
         print(
-            f"Finished training EEG torch model for {params_torch['max_epochs']} epochs after {round((time.time()-start_time_torch_eeg)/60,4)} min.\n---------"
+            f"Finished training EEG torch model for {params_torch['max_epochs']} epochs after {round((time.time()-start_time_torch_eeg)/60,4)} min. ---"
         )
 
         # Get EEG predictions
@@ -623,7 +623,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             ) = torch_prediction(torch_model_other, data_loader_other, device)
             print("Done with OTHER torch.")
 
-        print("Done with torch")
+        print("Done with torch. ---")
 
     print("Calculating features...")
     features = list()
@@ -1171,7 +1171,7 @@ def torch_prediction(model, data_loader, device):
         patient_id_list = []
         hour_list = []
         quality_list = []
-        for _, batch in enumerate(data_loader):
+        for _, batch in enumerate(tqdm(data_loader)):
             data, targets, ids, hours, qualities = (
                 batch["image"],
                 batch["label"],

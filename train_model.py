@@ -9,11 +9,14 @@
 # where 'data' is a folder containing the Challenge data and 'model' is a folder for saving your model.
 
 import sys
+import time
 from helper_code import is_integer
 from team_code import train_challenge_model
 
 if __name__ == '__main__':
     print("------------- train_model.py -------------")
+    start_time_train_model = time.time()
+
     # Parse the arguments.
     if not (len(sys.argv) == 3 or len(sys.argv) == 4):
         raise Exception('Include the data and model folders as arguments, e.g., python train_model.py data model.')
@@ -29,3 +32,5 @@ if __name__ == '__main__':
         verbose = 1
 
     train_challenge_model(data_folder, model_folder, verbose) ### Teams: Implement this function!!!
+
+    print(f"Finished running train_model.py in {round((time.time() - start_time_train_model)/60, 2)} minutes.")
