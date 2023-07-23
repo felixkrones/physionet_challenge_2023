@@ -10,6 +10,7 @@
 # folder for saving your models' outputs.
 
 import numpy as np, scipy as sp, os, sys
+from tqdm import tqdm
 from helper_code import *
 from team_code import load_challenge_models, run_challenge_models
 
@@ -40,8 +41,8 @@ def run_model(model_folder, data_folder, output_folder, allow_failures, verbose)
         print('Running the Challenge models on the Challenge data...')
 
     # Iterate over the patients.
-    for i in range(num_patients):
-        print(f"[{i}/{num_patients}]")
+    for i in tqdm(range(num_patients)):
+        # print(f"[{i}/{num_patients}]")
         if verbose >= 2:
             print('    {}/{}...'.format(i+1, num_patients))
 
