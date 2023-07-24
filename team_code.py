@@ -2395,7 +2395,7 @@ def train_torch_model(
             return model
 
     # Training loop
-    best_auc = float("inf")
+    best_auc = 0.
     min_val_loss = float("inf")
     best_epoch = 0
     for epoch in range(start_epoch, params["max_epochs"]):
