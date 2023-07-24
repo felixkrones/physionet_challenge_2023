@@ -855,11 +855,22 @@ def train_challenge_model(data_folder, model_folder, verbose):
     )
 
     # Plot and save feature importance.
+    n = 120
     feature_importance = outcome_model.feature_importances_
     feature_importance = 100.0 * (feature_importance / feature_importance.max())
     sorted_idx = np.argsort(feature_importance)
+    if len(sorted_idx) > n:
+        # Create a list of names of the features not being plotted
+        not_plotted_features = [feature_names[0][i] for i in sorted_idx[:-n]]
+        not_plotted_features = list(map(str, not_plotted_features))
+        #print("Features not being plotted:", not_plotted_features)
+        # Save not_plotted_features as a JSON file
+        with open(os.path.join(model_folder, "not_plotted_features.json"), 'w') as f:
+            json.dump(not_plotted_features, f)
+        # Adjust indices to plot only the top n features
+        sorted_idx = sorted_idx[-n:]
     pos = np.arange(sorted_idx.shape[0]) + 0.5
-    plt.figure(figsize=(12, min(len(feature_importance) / 2, 100)))
+    plt.figure(figsize=(12, min(n / 2, 100)))
     plt.barh(pos, feature_importance[sorted_idx], align="center")
     plt.yticks(pos, np.array(feature_names[0])[sorted_idx])
     plt.xlabel("Relative Importance")

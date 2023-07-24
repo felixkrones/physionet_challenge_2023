@@ -5,8 +5,8 @@
 #SBATCH --ntasks-per-node=28
 #SBATCH --gres=gpu:1
 #SBATCH --clusters=htc
-#SBATCH --time=11:10:00
-#SBATCH --partition=short
+#SBATCH --time=55:10:00
+#SBATCH --partition=long
 #SBATCH --job-name=physionet
 
 #SBATCH --mail-type=BEGIN,END
@@ -19,7 +19,7 @@ conda info --env
 
 # Define and run experiment
 root=/data/inet-multimodal-ai/wolf6245/data
-experiment_name=torch_EEG_only_-3h_-1Impute
+experiment_name=torch_EEG_only_-24h_-1Impute
 split_column=split
 split=all
 
