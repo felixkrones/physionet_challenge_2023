@@ -13,6 +13,7 @@
 # described on the Challenge webpage.
 
 import os, os.path, sys, numpy as np
+import pandas as pd
 from sklearn.metrics import roc_auc_score, roc_curve, confusion_matrix
 import matplotlib.pyplot as plt
 import time
@@ -91,7 +92,7 @@ def evaluate_model(label_folder, output_folder):
     #        subgroup_aucs[f"{s} (n={n})"] = compute_auc(l_f, o_f)[0]
 
     # Return the results.
-    return challenge_score, auroc_outcomes, auprc_outcomes, accuracy_outcomes, f_measure_outcomes, mse_cpcs, mae_cpcs, sklearn_auc, sklearn_roc, subgroup_scores, subgroup_aucs, label_outcomes, output_outcome_probabilities
+    return challenge_score, auroc_outcomes, auprc_outcomes, accuracy_outcomes, f_measure_outcomes, mse_cpcs, mae_cpcs, sklearn_auc, sklearn_roc, subgroup_scores, subgroup_aucs, label_outcomes, output_outcome_probabilities, patient_ids
 
 
 # Compute the Challenge score.
@@ -515,7 +516,7 @@ if __name__ == '__main__':
     start_time_evaluate = time.time()
 
     # Compute the scores for the model outputs.
-    challenge_score, auroc_outcomes, auprc_outcomes, accuracy_outcomes, f_measure_outcomes, mse_cpcs, mae_cpcs, sklearn_auc, sklearn_roc, subgroup_scores, subgroup_aucs, label_outcomes, output_outcome_probabilities = evaluate_model(sys.argv[1], sys.argv[2])
+    challenge_score, auroc_outcomes, auprc_outcomes, accuracy_outcomes, f_measure_outcomes, mse_cpcs, mae_cpcs, sklearn_auc, sklearn_roc, subgroup_scores, subgroup_aucs, label_outcomes, output_outcome_probabilities, patient_ids = evaluate_model(sys.argv[1], sys.argv[2])
 
     # Construct a string with scores.
     output_string = \
@@ -535,5 +536,10 @@ if __name__ == '__main__':
 
     # Plot decision threshold curve
     decision_threshold_plot(true_labels=label_outcomes, prediction_probabilities=output_outcome_probabilities, output_directory=f'{"/".join(sys.argv[3].split("/")[:-1])}/', split_string = sys.argv[3].split("split_")[-1].split("_")[0])
+
+    # Save patient ids and labels
+    output_dir = f'{"/".join(sys.argv[3].split("/")[:-1])}/'
+    pd_labels = pd.DataFrame({"patient_id": patient_ids, "label": label_outcomes})
+    pd_labels.to_csv(f"{output_dir}labels.csv", index=False)
 
     print(f"Finished evaluating model in {round(time.time()-start_time_evaluate, 2)} seconds")

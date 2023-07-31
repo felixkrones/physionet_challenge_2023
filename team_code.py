@@ -53,7 +53,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 # Recordings to use
 MIN_SIGNAL_LENGTH = 600  # seconds  # Minimum length of a signal to consider it
 SECONDS_TO_IGNORE_AT_START_AND_END_OF_RECORDING = 120
-NUM_HOURS_TO_USE = -10  # This currently uses the recording files, not hours
+NUM_HOURS_TO_USE = -24  # This currently uses the recording files, not hours
 
 # Filters
 FILTER_SIGNALS = True
@@ -72,9 +72,10 @@ USE_TORCH = True
 USE_GPU = True
 PARAMS_DEVICE = {"num_workers": min(26, os.cpu_count() - 2)}  # os.cpu_count()}
 LIM_HOURS_DURING_TRAINING = True  # If this is true, only the first NUM_HOURS_TO_USE hours are used for training torch
+HOURS_DURING_TRAINING = -6
 PARAMS_TORCH = {
     "batch_size": 16,
-    "val_size": 0.3,
+    "val_size": 0.2,
     "max_epochs": 20,
     "pretrained": True,
     "learning_rate": 0.00005,
@@ -112,11 +113,13 @@ BIPOLAR_MONTAGES = (
     None  # Not used in torch. Must have the format [[ch1, ch2], [ch3, ch4], ...]
 )
 NUM_HOURS_EEG = NUM_HOURS_TO_USE
+NUM_HOURS_EEG_TRAINING = HOURS_DURING_TRAINING
 
 # ECG usage
 USE_ECG = False
 ECG_CHANNELS = ["ECG", "ECGL", "ECGR", "ECG1", "ECG2"]  # ECG, ECG1, ECG2, ECGL, ECGR
 NUM_HOURS_ECG = NUM_HOURS_TO_USE
+NUM_HOURS_ECG_TRAINING = HOURS_DURING_TRAINING
 
 # OTHER usage
 USE_OTHER = False
@@ -133,6 +136,7 @@ OTHER_CHANNELS = [
     "LEG2",
 ]
 NUM_HOURS_OTHER = NUM_HOURS_TO_USE
+NUM_HOURS_OTHER_TRAINING = HOURS_DURING_TRAINING
 
 # REF usage
 USE_REF = False
@@ -154,9 +158,11 @@ REF_CHANNELS = [
     "In1-Ref3",
 ]
 NUM_HOURS_REF = NUM_HOURS_TO_USE
+NUM_HOURS_REF_TRAINING = HOURS_DURING_TRAINING
 
 # Model and training paramters
 C_MODEL = "rf"  # "xgb" or "rf
+AGG_OVER_CHANNELS = True
 PARAMS_RF = {
     "n_estimators": 100,
     "max_depth": 8,
@@ -280,7 +286,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
         # Get EEG DL data
         if LIM_HOURS_DURING_TRAINING:
-            hours_to_use = NUM_HOURS_EEG
+            hours_to_use = NUM_HOURS_EEG_TRAINING
         else:
             hours_to_use = None
         train_dataset_eeg = RecordingsDataset(
@@ -367,7 +373,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         if USE_ECG:
             # Get ECG DL data
             if LIM_HOURS_DURING_TRAINING:
-                hours_to_use = NUM_HOURS_ECG
+                hours_to_use = NUM_HOURS_ECG_TRAINING
             else:
                 hours_to_use = None
             train_dataset_ecg = RecordingsDataset(
@@ -454,7 +460,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         if USE_REF:
             # Get REF DL data
             if LIM_HOURS_DURING_TRAINING:
-                hours_to_use = NUM_HOURS_REF
+                hours_to_use = NUM_HOURS_REF_TRAINING
             else:
                 hours_to_use = None
             train_dataset_ref = RecordingsDataset(
@@ -541,7 +547,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         if USE_OTHER:
             # Get OTHER DL data
             if LIM_HOURS_DURING_TRAINING:
-                hours_to_use = NUM_HOURS_OTHER
+                hours_to_use = NUM_HOURS_OTHER_TRAINING
             else:
                 hours_to_use = None
             train_dataset_other = RecordingsDataset(
@@ -669,16 +675,21 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 hour_list_eeg,
                 quality_list_eeg,
                 patient_ids[i],
+                hours_to_use=NUM_HOURS_EEG
             )
             current_features = np.hstack(
                 (current_features, outcome_probabilities_torch_eeg)
             )
+            if NUM_HOURS_EEG >= 0:
+                count_aux = list(range(NUM_HOURS_EEG))
+            else:
+                count_aux = list(range(NUM_HOURS_EEG, 0))
             current_feature_names = np.hstack(
                 (
                     current_feature_names,
                     [
                         f"prob_eeg_torch_{i}"
-                        for i in range(len(outcome_probabilities_torch_eeg))
+                        for i in count_aux
                     ],
                 )
             )
@@ -695,16 +706,21 @@ def train_challenge_model(data_folder, model_folder, verbose):
                     hour_list_ecg,
                     quality_list_ecg,
                     patient_ids[i],
+                    hours_to_use=NUM_HOURS_ECG
                 )
                 current_features = np.hstack(
                     (current_features, outcome_probabilities_torch_ecg)
                 )
+                if NUM_HOURS_ECG >= 0:
+                    count_aux = list(range(NUM_HOURS_ECG))
+                else:
+                    count_aux = list(range(NUM_HOURS_ECG, 0))
                 current_feature_names = np.hstack(
                     (
                         current_feature_names,
                         [
                             f"prob_ecg_torch_{i}"
-                            for i in range(len(outcome_probabilities_torch_ecg))
+                            for i in count_aux
                         ],
                     )
                 )
@@ -723,16 +739,21 @@ def train_challenge_model(data_folder, model_folder, verbose):
                     hour_list_ref,
                     quality_list_ref,
                     patient_ids[i],
+                    hours_to_use=NUM_HOURS_REF
                 )
                 current_features = np.hstack(
                     (current_features, outcome_probabilities_torch_ref)
                 )
+                if NUM_HOURS_REF >= 0:
+                    count_aux = list(range(NUM_HOURS_REF))
+                else:
+                    count_aux = list(range(NUM_HOURS_REF, 0))
                 current_feature_names = np.hstack(
                     (
                         current_feature_names,
                         [
                             f"prob_ref_torch_{i}"
-                            for i in range(len(outcome_probabilities_torch_ref))
+                            for i in count_aux
                         ],
                     )
                 )
@@ -751,16 +772,21 @@ def train_challenge_model(data_folder, model_folder, verbose):
                     hour_list_other,
                     quality_list_other,
                     patient_ids[i],
+                    hours_to_use=NUM_HOURS_OTHER
                 )
                 current_features = np.hstack(
                     (current_features, outcome_probabilities_torch_other)
                 )
+                if NUM_HOURS_OTHER >= 0:
+                    count_aux = list(range(NUM_HOURS_OTHER))
+                else:
+                    count_aux = list(range(NUM_HOURS_OTHER, 0))
                 current_feature_names = np.hstack(
                     (
                         current_feature_names,
                         [
-                            f"prob_other_torch_{i}"
-                            for i in range(len(outcome_probabilities_torch_other))
+                            f"prob_OTHER_torch_{i}"
+                            for i in count_aux
                         ],
                     )
                 )
@@ -924,7 +950,7 @@ def load_challenge_models(model_folder, verbose):
 
 # Run your trained models. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function.
-def run_challenge_models(models, data_folder, patient_id, verbose):
+def run_challenge_models(models, data_folder, patient_id, verbose, return_eeg_torch_probs=False):
     imputer = models["imputer"]
     outcome_model = models["outcome_model"]
     cpc_model = models["cpc_model"]
@@ -982,6 +1008,7 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
             hour_list_eeg,
             quality_list_eeg,
             patient_id,
+            hours_to_use=NUM_HOURS_EEG,
         )
         features = np.hstack((features, outcome_probabilities_torch_eeg))
         if USE_ECG:
@@ -1015,6 +1042,7 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
                 hour_list_ecg,
                 quality_list_ecg,
                 patient_id,
+                hours_to_use=NUM_HOURS_ECG
             )
             features = np.hstack((features, outcome_probabilities_torch_ecg))
         if USE_REF:
@@ -1048,6 +1076,7 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
                 hour_list_ref,
                 quality_list_ref,
                 patient_id,
+                hours_to_use=NUM_HOURS_REF,
             )
             features = np.hstack((features, outcome_probabilities_torch_ref))
         if USE_OTHER:
@@ -1081,8 +1110,11 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
                 hour_list_other,
                 quality_list_other,
                 patient_id,
+                hours_to_use=NUM_HOURS_OTHER,
             )
             features = np.hstack((features, outcome_probabilities_torch_other))
+    else:
+        outcome_probabilities_torch_eeg = float('nan')
 
     # Impute missing data.
     features = features.reshape(1, -1)
@@ -1101,7 +1133,10 @@ def run_challenge_models(models, data_folder, patient_id, verbose):
     # Ensure that the CPC score is between (or equal to) 1 and 5.
     cpc = np.clip(cpc, 1, 5)
 
-    return outcome, outcome_probability, cpc
+    if return_eeg_torch_probs:
+        return outcome, outcome_probability, cpc, outcome_probabilities_torch_eeg
+    else:
+        return outcome, outcome_probability, cpc
 
 
 ################################################################################
@@ -1211,6 +1246,7 @@ def torch_predictions_for_patient(
     max_hours=72,
     min_quality=0,
     num_signals=None,
+    hours_to_use=None
 ):
     # Get the predictions for the patient
     patient_mask = np.array(
@@ -1231,15 +1267,27 @@ def torch_predictions_for_patient(
             )
 
     #  Get values
-    outcome_probabilities_torch = [
-        outcome_probabilities_torch[hours_patients.index(hour)]
-        if hour in hours_patients
-        else np.nan
-        for hour in range(max_hours)
-    ]
+    #outcome_probabilities_torch = [
+    #    outcome_probabilities_torch[hours_patients.index(hour)]
+    #    if hour in hours_patients
+    #    else np.nan
+    #    for hour in range(max_hours)
+    #]
+
+    if len(outcome_probabilities_torch) < abs(hours_to_use):
+        len_diff = abs(hours_to_use) - len(outcome_probabilities_torch)
+        aux_list = [np.nan] * len_diff
+        if hours_to_use < 0:
+            outcome_probabilities_torch = aux_list + outcome_probabilities_torch
+        else:
+            outcome_probabilities_torch = outcome_probabilities_torch + aux_list
+
     if IMPUTE:
         outcome_probabilities_torch_imputed = (
             pd.Series(outcome_probabilities_torch, dtype=object).bfill().tolist()
+        )
+        outcome_probabilities_torch_imputed = (
+            pd.Series(outcome_probabilities_torch_imputed, dtype=object).ffill().tolist()
         )
     else:
         outcome_probabilities_torch_imputed = pd.Series(
@@ -1250,7 +1298,7 @@ def torch_predictions_for_patient(
     ]
 
     # Aggregate the probabilities
-    weights = range(max_hours)
+    weights = range(len(outcome_probabilities_torch))
     agg_outcome_probability_torch = [
         p * w for p, w in zip(outcome_probabilities_torch, weights) if not np.isnan(p)
     ]
@@ -1511,6 +1559,21 @@ def get_recording_features(
             utility_frequency
         ) = channels = recording_id = quality = hour = None
 
+    # Aggregate over channels
+    if AGG_OVER_CHANNELS:
+        recording_feature_group_names = [f'{f.split("_c_")[0]}_{f.split("_c_")[-1].split("hour_")[-1]}' for f in recording_feature_names]
+        unique_groups = np.unique(recording_feature_group_names)
+        recording_features_agg = np.zeros(len(unique_groups))
+        for i, group in enumerate(unique_groups):
+            aux_values = recording_features[[True if group == f else False for f in recording_feature_group_names]]
+            if len(aux_values) == 0 or np.all(np.isnan(aux_values)):
+                #print(f"Group {group} not found in {recording_feature_group_names}. len(aux_values) = {len(aux_values)}")
+                recording_features_agg[i] = float("nan")
+            else:
+                recording_features_agg[i] = np.nanmean(aux_values)
+        recording_features = recording_features_agg
+        recording_feature_names = unique_groups
+
     return (
         recording_features,
         recording_feature_names,
@@ -1647,7 +1710,7 @@ def get_patient_features(
             age,
             female,
             male,
-            other,
+            #other,
             rosc,
             ohca,
             shockable_rhythm,
@@ -1662,7 +1725,7 @@ def get_patient_features(
         "age",
         "female",
         "male",
-        "other",
+        #"other",
         "rosc",
         "ohca",
         "shockable_rhythm",

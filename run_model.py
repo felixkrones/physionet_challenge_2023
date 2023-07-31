@@ -9,6 +9,7 @@
 # where 'models' is a folder containing the your trained models, 'data' is a folder containing the Challenge data, and 'outputs' is a
 # folder for saving your models' outputs.
 
+import pandas as pd
 import numpy as np, scipy as sp, os, sys
 from tqdm import tqdm
 import time
@@ -42,6 +43,8 @@ def run_model(model_folder, data_folder, output_folder, allow_failures, verbose)
         print('Running the Challenge models on the Challenge data...')
 
     # Iterate over the patients.
+    patient_list = []
+    toruch_output_list = []
     for i in tqdm(range(num_patients)):
         # print(f"[{i}/{num_patients}]")
         if verbose >= 2:
@@ -51,12 +54,12 @@ def run_model(model_folder, data_folder, output_folder, allow_failures, verbose)
 
         # Allow or disallow the model(s) to fail on parts of the data; this can be helpful for debugging.
         try:
-            outcome_binary, outcome_probability, cpc = run_challenge_models(models, data_folder, patient_id, verbose) ### Teams: Implement this function!!!
+            outcome_binary, outcome_probability, cpc, torch_probs = run_challenge_models(models, data_folder, patient_id, verbose, True) ### Teams: Implement this function!!!
         except:
             if allow_failures:
                 if verbose >= 2:
                     print('... failed.')
-                outcome_binary, outcome_probability, cpc = float('nan'), float('nan'), float('nan')
+                outcome_binary, outcome_probability, cpc, torch_probs = float('nan'), float('nan'), float('nan'), float('nan')
             else:
                 raise
 
@@ -64,6 +67,15 @@ def run_model(model_folder, data_folder, output_folder, allow_failures, verbose)
         os.makedirs(os.path.join(output_folder, patient_id), exist_ok=True)
         output_file = os.path.join(output_folder, patient_id, patient_id + '.txt')
         save_challenge_outputs(output_file, patient_id, outcome_binary, outcome_probability, cpc)
+
+        # Save torch outputs.
+        patient_list.append(patient_id)
+        toruch_output_list.append(torch_probs)
+
+    # Save torch outputs.
+    torch_probs_pd = pd.DataFrame(toruch_output_list, index=patient_list)
+    torch_output_file = os.path.join(output_folder, 'torch.csv')
+    torch_probs_pd.to_csv(torch_output_file, index=True)
 
     if verbose >= 1:
         print('Done.')
