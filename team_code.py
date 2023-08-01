@@ -53,7 +53,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 # Recordings to use
 MIN_SIGNAL_LENGTH = 600  # seconds  # Minimum length of a signal to consider it
 SECONDS_TO_IGNORE_AT_START_AND_END_OF_RECORDING = 120
-NUM_HOURS_TO_USE = -24  # This currently uses the recording files, not hours
+NUM_HOURS_TO_USE = -12  # This currently uses the recording files, not hours
 
 # Filters
 FILTER_SIGNALS = True

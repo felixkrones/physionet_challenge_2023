@@ -1,6 +1,6 @@
 # Define and run experiment
 root=/Users/felixkrones/python_projects/data
-experiment_name=torch_-24h_agg
+experiment_name=torch_-12h_agg
 split_column=split
 
 split=1
