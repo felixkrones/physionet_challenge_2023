@@ -540,6 +540,6 @@ if __name__ == '__main__':
     # Save patient ids and labels
     output_dir = f'{"/".join(sys.argv[3].split("/")[:-1])}/'
     pd_labels = pd.DataFrame({"patient_id": patient_ids, "label": label_outcomes})
-    pd_labels.to_csv(f"{output_dir}labels.csv", index=False)
+    pd_labels.to_csv(f'{output_dir}labels_{sys.argv[3].split("split_")[-1].split("_")[0]}.csv', index=False)
 
     print(f"Finished evaluating model in {round(time.time()-start_time_evaluate, 2)} seconds")

@@ -1277,10 +1277,13 @@ def torch_predictions_for_patient(
     if len(outcome_probabilities_torch) < abs(hours_to_use):
         len_diff = abs(hours_to_use) - len(outcome_probabilities_torch)
         aux_list = [np.nan] * len_diff
-        if hours_to_use < 0:
-            outcome_probabilities_torch = aux_list + outcome_probabilities_torch
+        if len(aux_list) == abs(hours_to_use):
+            outcome_probabilities_torch = aux_list
         else:
-            outcome_probabilities_torch = outcome_probabilities_torch + aux_list
+            if hours_to_use < 0:
+                outcome_probabilities_torch = aux_list + outcome_probabilities_torch
+            else:
+                outcome_probabilities_torch = outcome_probabilities_torch + aux_list
 
     if IMPUTE:
         outcome_probabilities_torch_imputed = (
