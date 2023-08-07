@@ -70,12 +70,18 @@ HIGH_THRESHOLD = 300
 # Torch settings
 USE_TORCH = True
 USE_GPU = True
+USE_AGGREGATION = False
+AGGREGATION_METHOD = "voting"
+DECISION_THRESHOLD = 0.5
+VOTING_POS_MAJORITY_THRESHOLD = 0.66
+INFUSE_STATIC_FEATURES = False
+ONLY_EEG_TORCH = False
 PARAMS_DEVICE = {"num_workers": min(26, os.cpu_count() - 2)}  # os.cpu_count()}
 LIM_HOURS_DURING_TRAINING = True  # If this is true, only the first NUM_HOURS_TO_USE hours are used for training torch
-HOURS_DURING_TRAINING = -6
+HOURS_DURING_TRAINING = -24
 PARAMS_TORCH = {
     "batch_size": 16,
-    "val_size": 0.2,
+    "val_size": 0.1,
     "max_epochs": 20,
     "pretrained": True,
     "learning_rate": 0.00005,
@@ -163,6 +169,7 @@ NUM_HOURS_REF_TRAINING = HOURS_DURING_TRAINING
 # Model and training paramters
 C_MODEL = "rf"  # "xgb" or "rf
 AGG_OVER_CHANNELS = True
+AGG_OVER_TIME = False
 PARAMS_RF = {
     "n_estimators": 100,
     "max_depth": 8,
@@ -170,7 +177,11 @@ PARAMS_RF = {
     "random_state": 42,
     "n_jobs": PARAMS_DEVICE["num_workers"],
 }
+CLASS_WEIGHT = None # {0:2, 1:1} # default is None
 PARAMS_XGB = {"max_depth": 8, "eval_metric": "auc", "nthread": 8}
+
+# Tests
+assert (ONLY_EEG_TORCH == False) or ((ONLY_EEG_TORCH == True) and (USE_AGGREGATION == True) and (USE_TORCH == True)), "If only torch should be used, torch must be used (USE_TORCH) and aggregated (USE_AGGREGATION)"
 
 
 ################################################################################
@@ -212,6 +223,14 @@ def train_challenge_model(data_folder, model_folder, verbose):
         "C_MODEL": C_MODEL,
         "PARAMS_RF": PARAMS_RF,
         "PARAMS_XGB": PARAMS_XGB,
+        "AGG_OVER_CHANNELS": AGG_OVER_CHANNELS,
+        "AGG_OVER_TIME": AGG_OVER_TIME,
+        "USE_AGGREGATION": USE_AGGREGATION,
+        "AGGREGATION_METHOD": AGGREGATION_METHOD,
+        "DECISION_THRESHOLD": DECISION_THRESHOLD,
+        "VOTING_POS_MAJORITY_THRESHOLD": VOTING_POS_MAJORITY_THRESHOLD,
+        "INFUSE_STATIC_FEATURES": INFUSE_STATIC_FEATURES,
+        "ONLY_EEG_TORCH": ONLY_EEG_TORCH,
     }
     if not os.path.exists(model_folder):
         os.makedirs(model_folder)
@@ -224,6 +243,23 @@ def train_challenge_model(data_folder, model_folder, verbose):
     params_rf = PARAMS_RF
     params_xgb = PARAMS_XGB
 
+    # Find data files.
+    start_time = time.time()
+    if verbose >= 1:
+        print(f"Finding the challenge data in {data_folder}...")
+    patient_ids = find_data_folders(data_folder)
+    num_patients = len(patient_ids)
+    if num_patients == 0:
+        raise FileNotFoundError("No data was provided.")
+
+    # Create a folder for the model if it does not already exist.
+    os.makedirs(model_folder, exist_ok=True)
+
+    # TORCH
+    torch_model_eeg = None
+    torch_model_ecg = None
+    torch_model_other = None
+    torch_model_ref = None
     if USE_TORCH:
         # Get device
         if USE_GPU:
@@ -246,41 +282,13 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 f"Train with torch and {c_model}:\n torch params: {params_torch},\n {c_model} params: {params_xgb}"
             )
         else:
-            raise ValueError(f"No such c_model: {c_model}")
-    else:
-        if c_model == "rf":
-            print(
-                f"Train without torch but with {c_model}:\n {c_model} params: {params_rf}"
-            )
-        elif c_model == "xgb":
-            print(
-                f"Train without torch but with {c_model}:\n {c_model} params: {params_xgb}"
-            )
-        else:
-            raise ValueError(f"No such c_model: {c_model}")
+            raise ValueError(f"No such c_model: {c_model}")\
 
-    # Find data files.
-    start_time = time.time()
-    if verbose >= 1:
-        print(f"Finding the challenge data in {data_folder}...")
-    patient_ids = find_data_folders(data_folder)
-    num_patients = len(patient_ids)
-    if num_patients == 0:
-        raise FileNotFoundError("No data was provided.")
-
-    # Create a folder for the model if it does not already exist.
-    os.makedirs(model_folder, exist_ok=True)
-
-    torch_model_eeg = None
-    torch_model_ecg = None
-    torch_model_other = None
-    torch_model_ref = None
-    if USE_TORCH:
         # Split into train and validation set
         num_val = int(num_patients * params_torch["val_size"])
         num_train = num_patients - num_val
         patient_ids_aux = patient_ids.copy()
-        random.Random(42).shuffle(patient_ids_aux)  # TODO: Is this good?
+        random.Random(42).shuffle(patient_ids_aux)
         train_ids = patient_ids_aux[:num_train]
         val_ids = patient_ids_aux[num_train:]
 
@@ -338,6 +346,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             d_size=len(train_loader_eeg),
             pretrained=params_torch["pretrained"],
             channel_size=len(EEG_CHANNELS),
+            additional_features=torch_dataset_eeg.num_additional_features
         )
 
         # Find last checkpoint
@@ -429,6 +438,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 d_size=len(train_loader_ecg),
                 pretrained=params_torch["pretrained"],
                 channel_size=len(ECG_CHANNELS),
+                additional_features=torch_dataset_ecg.num_additional_features
             )
 
             # Train ECG torch model
@@ -516,6 +526,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 d_size=len(train_loader_ref),
                 pretrained=params_torch["pretrained"],
                 channel_size=len(REF_CHANNELS),
+                additional_features=torch_dataset_ref.num_additional_features
             )
 
             # Train REF torch model
@@ -603,6 +614,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 d_size=len(train_loader_other),
                 pretrained=params_torch["pretrained"],
                 channel_size=len(OTHER_CHANNELS),
+                additional_features=torch_dataset_other.num_additional_features
             )
 
             # Train OTHER torch model
@@ -630,8 +642,19 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 quality_list_other,
             ) = torch_prediction(torch_model_other, data_loader_other, device)
             print("Done with OTHER torch.")
-
         print("Done with torch. ---")
+
+    else:
+        if c_model == "rf":
+            print(
+                f"Train without torch but with {c_model}:\n {c_model} params: {params_rf}"
+            )
+        elif c_model == "xgb":
+            print(
+                f"Train without torch but with {c_model}:\n {c_model} params: {params_xgb}"
+            )
+        else:
+            raise ValueError(f"No such c_model: {c_model}")
 
     print("Calculating features...")
     features = list()
@@ -655,145 +678,99 @@ def train_challenge_model(data_folder, model_folder, verbose):
             print("    {}/{}...".format(i + 1, num_patients))
 
         # Load data and extract features
-        patient_metadata = load_challenge_data(data_folder, patient_ids[i])
-        (
-            current_features,
-            current_feature_names,
-            hospital,
-            recording_infos,
-        ) = get_features(data_folder, patient_ids[i])
+        if not ONLY_EEG_TORCH:
+            patient_metadata = load_challenge_data(data_folder, patient_ids[i])
+            (
+                current_features,
+                current_feature_names,
+                hospital,
+                recording_infos,
+            ) = get_features(data_folder, patient_ids[i])
 
         if USE_TORCH:
             # Get torch predictions
             (
-                agg_outcome_probabilities_torch_eeg,
                 outcome_probabilities_torch_eeg,
                 outcome_flags_torch_eeg,
+                torch_names_eeg,
             ) = torch_predictions_for_patient(
                 output_list_eeg,
                 patient_id_list_eeg,
                 hour_list_eeg,
                 quality_list_eeg,
                 patient_ids[i],
-                hours_to_use=NUM_HOURS_EEG
+                hours_to_use=NUM_HOURS_EEG,
+                group="EEG",
             )
-            current_features = np.hstack(
-                (current_features, outcome_probabilities_torch_eeg)
-            )
-            if NUM_HOURS_EEG >= 0:
-                count_aux = list(range(NUM_HOURS_EEG))
+
+            if ONLY_EEG_TORCH:
+                current_features = outcome_probabilities_torch_eeg
+                current_feature_names = torch_names_eeg
             else:
-                count_aux = list(range(NUM_HOURS_EEG, 0))
-            current_feature_names = np.hstack(
-                (
-                    current_feature_names,
-                    [
-                        f"prob_eeg_torch_{i}"
-                        for i in count_aux
-                    ],
-                )
-            )
-            outcome_probabilities_torch_eeg_aux.append(outcome_probabilities_torch_eeg)
-            outcome_flags_torch_eeg_aux.append(outcome_flags_torch_eeg)
-            if USE_ECG:
-                (
-                    agg_outcome_probabilities_torch_ecg,
-                    outcome_probabilities_torch_ecg,
-                    outcome_flags_torch_ecg,
-                ) = torch_predictions_for_patient(
-                    output_list_ecg,
-                    patient_id_list_ecg,
-                    hour_list_ecg,
-                    quality_list_ecg,
-                    patient_ids[i],
-                    hours_to_use=NUM_HOURS_ECG
-                )
-                current_features = np.hstack(
-                    (current_features, outcome_probabilities_torch_ecg)
-                )
-                if NUM_HOURS_ECG >= 0:
-                    count_aux = list(range(NUM_HOURS_ECG))
-                else:
-                    count_aux = list(range(NUM_HOURS_ECG, 0))
-                current_feature_names = np.hstack(
+                current_features = np.hstack((current_features, outcome_probabilities_torch_eeg))
+                current_feature_names = np.hstack((current_feature_names,torch_names_eeg))
+                outcome_probabilities_torch_eeg_aux.append(outcome_probabilities_torch_eeg)
+                outcome_flags_torch_eeg_aux.append(outcome_flags_torch_eeg)
+                if USE_ECG:
                     (
-                        current_feature_names,
-                        [
-                            f"prob_ecg_torch_{i}"
-                            for i in count_aux
-                        ],
+                        outcome_probabilities_torch_ecg,
+                        outcome_flags_torch_ecg,
+                        torch_names_ecg,
+                    ) = torch_predictions_for_patient(
+                        output_list_ecg,
+                        patient_id_list_ecg,
+                        hour_list_ecg,
+                        quality_list_ecg,
+                        patient_ids[i],
+                        hours_to_use=NUM_HOURS_ECG,
+                        group="ECG",
                     )
-                )
-                outcome_probabilities_torch_ecg_aux.append(
-                    outcome_probabilities_torch_ecg
-                )
-                outcome_flags_torch_ecg_aux.append(outcome_flags_torch_ecg)
-            if USE_REF:
-                (
-                    agg_outcome_probabilities_torch_ref,
-                    outcome_probabilities_torch_ref,
-                    outcome_flags_torch_ref,
-                ) = torch_predictions_for_patient(
-                    output_list_ref,
-                    patient_id_list_ref,
-                    hour_list_ref,
-                    quality_list_ref,
-                    patient_ids[i],
-                    hours_to_use=NUM_HOURS_REF
-                )
-                current_features = np.hstack(
-                    (current_features, outcome_probabilities_torch_ref)
-                )
-                if NUM_HOURS_REF >= 0:
-                    count_aux = list(range(NUM_HOURS_REF))
-                else:
-                    count_aux = list(range(NUM_HOURS_REF, 0))
-                current_feature_names = np.hstack(
+                    current_features = np.hstack((current_features, outcome_probabilities_torch_ecg))
+                    current_feature_names = np.hstack((current_feature_names,torch_names_ecg))
+                    outcome_probabilities_torch_ecg_aux.append(
+                        outcome_probabilities_torch_ecg
+                    )
+                    outcome_flags_torch_ecg_aux.append(outcome_flags_torch_ecg)
+                if USE_REF:
                     (
-                        current_feature_names,
-                        [
-                            f"prob_ref_torch_{i}"
-                            for i in count_aux
-                        ],
+                        outcome_probabilities_torch_ref,
+                        outcome_flags_torch_ref,
+                        torch_names_ref,
+                    ) = torch_predictions_for_patient(
+                        output_list_ref,
+                        patient_id_list_ref,
+                        hour_list_ref,
+                        quality_list_ref,
+                        patient_ids[i],
+                        hours_to_use=NUM_HOURS_REF,
+                        group="REF",
                     )
-                )
-                outcome_probabilities_torch_ref_aux.append(
-                    outcome_probabilities_torch_ref
-                )
-                outcome_flags_torch_ref_aux.append(outcome_flags_torch_ref)
-            if USE_OTHER:
-                (
-                    agg_outcome_probabilities_torch_other,
-                    outcome_probabilities_torch_other,
-                    outcome_flags_torch_other,
-                ) = torch_predictions_for_patient(
-                    output_list_other,
-                    patient_id_list_other,
-                    hour_list_other,
-                    quality_list_other,
-                    patient_ids[i],
-                    hours_to_use=NUM_HOURS_OTHER
-                )
-                current_features = np.hstack(
-                    (current_features, outcome_probabilities_torch_other)
-                )
-                if NUM_HOURS_OTHER >= 0:
-                    count_aux = list(range(NUM_HOURS_OTHER))
-                else:
-                    count_aux = list(range(NUM_HOURS_OTHER, 0))
-                current_feature_names = np.hstack(
+                    current_features = np.hstack((current_features, outcome_probabilities_torch_ref))
+                    current_feature_names = np.hstack((current_feature_names,torch_names_ref))
+                    outcome_probabilities_torch_ref_aux.append(
+                        outcome_probabilities_torch_ref
+                    )
+                    outcome_flags_torch_ref_aux.append(outcome_flags_torch_ref)
+                if USE_OTHER:
                     (
-                        current_feature_names,
-                        [
-                            f"prob_OTHER_torch_{i}"
-                            for i in count_aux
-                        ],
+                        outcome_probabilities_torch_other,
+                        outcome_flags_torch_other,
+                        torch_names_other,
+                    ) = torch_predictions_for_patient(
+                        output_list_other,
+                        patient_id_list_other,
+                        hour_list_other,
+                        quality_list_other,
+                        patient_ids[i],
+                        hours_to_use=NUM_HOURS_OTHER,
+                        group="OTHER",
                     )
-                )
-                outcome_probabilities_torch_other_aux.append(
-                    outcome_probabilities_torch_other
-                )
-                outcome_flags_torch_other_aux.append(outcome_flags_torch_other)
+                    current_features = np.hstack((current_features, outcome_probabilities_torch_other))
+                    current_feature_names = np.hstack((current_feature_names,torch_names_other))
+                    outcome_probabilities_torch_other_aux.append(
+                        outcome_probabilities_torch_other
+                    )
+                    outcome_flags_torch_other_aux.append(outcome_flags_torch_other)
 
         # Extract labels.
         features.append(current_features)
@@ -830,7 +807,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         train_pd[key] = values_aux
     train_pd.to_csv(os.path.join(model_folder, "train_features.csv"), index=False)
 
-    # Impute any missing features; use the mean value by default.
+    # Impute any missing features.
     if IMPUTE:
         print("Imputing features...")
         imputer = SimpleImputer(
@@ -857,16 +834,45 @@ def train_challenge_model(data_folder, model_folder, verbose):
     )
 
     # Train the models.
-    print("Start training challenge model...")
-    if c_model == "rf":
-        outcome_model = RandomForestClassifier(**params_rf)
-        cpc_model = RandomForestRegressor(**params_rf)
-    elif c_model == "xgb":
-        outcome_model = xgb.XGBClassifier(**params_xgb)
-        cpc_model = xgb.XGBRegressor(**params_xgb)
-    outcome_model.fit(features, outcomes.ravel())
-    cpc_model.fit(features, cpcs.ravel())
-    print("Finished training challenge model.")
+    if ONLY_EEG_TORCH:
+        outcome_model = None
+        cpc_model = None
+    else:
+        print("Start training challenge model...")
+        if c_model == "rf":
+            outcome_model = RandomForestClassifier(**params_rf, class_weight=CLASS_WEIGHT)
+            cpc_model = RandomForestRegressor(**params_rf)
+        elif c_model == "xgb":
+            outcome_model = xgb.XGBClassifier(**params_xgb, class_weight=CLASS_WEIGHT)
+            cpc_model = xgb.XGBRegressor(**params_xgb)
+        outcome_model.fit(features, outcomes.ravel())
+        cpc_model.fit(features, cpcs.ravel())
+        print("Finished training challenge model.")
+
+        # Plot and save feature importance.
+        n = 120
+        feature_importance = outcome_model.feature_importances_
+        feature_importance = 100.0 * (feature_importance / feature_importance.max())
+        sorted_idx = np.argsort(feature_importance)
+        if len(sorted_idx) > n:
+            # Create a list of names of the features not being plotted
+            not_plotted_features = [feature_names[0][i] for i in sorted_idx[:-n]]
+            not_plotted_features = list(map(str, not_plotted_features))
+            #print("Features not being plotted:", not_plotted_features)
+            # Save not_plotted_features as a JSON file
+            with open(os.path.join(model_folder, "not_plotted_features.json"), 'w') as f:
+                json.dump(not_plotted_features, f)
+            # Adjust indices to plot only the top n features
+            sorted_idx = sorted_idx[-n:]
+        pos = np.arange(sorted_idx.shape[0]) + 0.5
+        plt.figure(figsize=(12, min(n / 2, 100)))
+        plt.barh(pos, feature_importance[sorted_idx], align="center")
+        plt.yticks(pos, np.array(feature_names[0])[sorted_idx])
+        plt.xlabel("Relative Importance")
+        plt.title("Variable Importance")
+        plt.tight_layout()
+        plt.savefig(os.path.join(model_folder, "feature_importance.png"))
+        plt.close()
 
     # Save the models.
     save_challenge_model(
@@ -879,31 +885,6 @@ def train_challenge_model(data_folder, model_folder, verbose):
         torch_model_ref=torch_model_ref,
         torch_model_other=torch_model_other,
     )
-
-    # Plot and save feature importance.
-    n = 120
-    feature_importance = outcome_model.feature_importances_
-    feature_importance = 100.0 * (feature_importance / feature_importance.max())
-    sorted_idx = np.argsort(feature_importance)
-    if len(sorted_idx) > n:
-        # Create a list of names of the features not being plotted
-        not_plotted_features = [feature_names[0][i] for i in sorted_idx[:-n]]
-        not_plotted_features = list(map(str, not_plotted_features))
-        #print("Features not being plotted:", not_plotted_features)
-        # Save not_plotted_features as a JSON file
-        with open(os.path.join(model_folder, "not_plotted_features.json"), 'w') as f:
-            json.dump(not_plotted_features, f)
-        # Adjust indices to plot only the top n features
-        sorted_idx = sorted_idx[-n:]
-    pos = np.arange(sorted_idx.shape[0]) + 0.5
-    plt.figure(figsize=(12, min(n / 2, 100)))
-    plt.barh(pos, feature_importance[sorted_idx], align="center")
-    plt.yticks(pos, np.array(feature_names[0])[sorted_idx])
-    plt.xlabel("Relative Importance")
-    plt.title("Variable Importance")
-    plt.tight_layout()
-    plt.savefig(os.path.join(model_folder, "feature_importance.png"))
-    plt.close()
 
     if verbose >= 1:
         print(f"Done after {round((time.time()-start_time)/60,4)} min.")
@@ -999,9 +980,9 @@ def run_challenge_models(models, data_folder, patient_id, verbose, return_eeg_to
             quality_list_eeg,
         ) = torch_prediction(torch_model_eeg, data_loader_eeg, device)
         (
-            agg_outcome_probability_torch_eeg,
             outcome_probabilities_torch_eeg,
             outcome_flags_torch_eeg,
+            torch_names_eeg
         ) = torch_predictions_for_patient(
             output_list_eeg,
             patient_id_list_eeg,
@@ -1009,6 +990,7 @@ def run_challenge_models(models, data_folder, patient_id, verbose, return_eeg_to
             quality_list_eeg,
             patient_id,
             hours_to_use=NUM_HOURS_EEG,
+            group="EEG",
         )
         features = np.hstack((features, outcome_probabilities_torch_eeg))
         if USE_ECG:
@@ -1033,16 +1015,17 @@ def run_challenge_models(models, data_folder, patient_id, verbose, return_eeg_to
                 quality_list_ecg,
             ) = torch_prediction(torch_model_ecg, data_loader_ecg, device)
             (
-                agg_outcome_probability_torch_ecg,
                 outcome_probabilities_torch_ecg,
                 outcome_flags_torch_ecg,
+                torch_names_ecg
             ) = torch_predictions_for_patient(
                 output_list_ecg,
                 patient_id_list_ecg,
                 hour_list_ecg,
                 quality_list_ecg,
                 patient_id,
-                hours_to_use=NUM_HOURS_ECG
+                hours_to_use=NUM_HOURS_ECG,
+                group="ECG",
             )
             features = np.hstack((features, outcome_probabilities_torch_ecg))
         if USE_REF:
@@ -1067,9 +1050,9 @@ def run_challenge_models(models, data_folder, patient_id, verbose, return_eeg_to
                 quality_list_ref,
             ) = torch_prediction(torch_model_ref, data_loader_ref, device)
             (
-                agg_outcome_probability_torch_ref,
                 outcome_probabilities_torch_ref,
                 outcome_flags_torch_ref,
+                torch_names_ref
             ) = torch_predictions_for_patient(
                 output_list_ref,
                 patient_id_list_ref,
@@ -1077,6 +1060,7 @@ def run_challenge_models(models, data_folder, patient_id, verbose, return_eeg_to
                 quality_list_ref,
                 patient_id,
                 hours_to_use=NUM_HOURS_REF,
+                group="REF",
             )
             features = np.hstack((features, outcome_probabilities_torch_ref))
         if USE_OTHER:
@@ -1101,9 +1085,9 @@ def run_challenge_models(models, data_folder, patient_id, verbose, return_eeg_to
                 quality_list_other,
             ) = torch_prediction(torch_model_other, data_loader_other, device)
             (
-                agg_outcome_probability_torch_other,
                 outcome_probabilities_torch_other,
                 outcome_flags_torch_other,
+                torch_names_other
             ) = torch_predictions_for_patient(
                 output_list_other,
                 patient_id_list_other,
@@ -1111,6 +1095,7 @@ def run_challenge_models(models, data_folder, patient_id, verbose, return_eeg_to
                 quality_list_other,
                 patient_id,
                 hours_to_use=NUM_HOURS_OTHER,
+                group="OTHER",
             )
             features = np.hstack((features, outcome_probabilities_torch_other))
     else:
@@ -1122,13 +1107,18 @@ def run_challenge_models(models, data_folder, patient_id, verbose, return_eeg_to
         features = imputer.transform(features)
 
     # Apply models to features.
-    if verbose >= 2:
-        print("Applying models...")
-    outcome = outcome_model.predict(features)[0]
-    outcome_probability = outcome_model.predict_proba(features)[0, 1]
-    # outcome_probability = agg_outcome_probability_torch
-    # outcome = 1 if outcome_probability > 0.5 else 0
-    cpc = cpc_model.predict(features)[0]
+    if ONLY_EEG_TORCH:
+        outcome = features[0]
+        outcome_probability = features[0]
+        cpc = [1 if outcome_probability < 0.5 else 5]
+    else:
+        if verbose >= 2:
+            print("Applying models...")
+        outcome = outcome_model.predict(features)[0]
+        outcome_probability = outcome_model.predict_proba(features)[0, 1]
+        # outcome_probability = agg_outcome_probability_torch
+        # outcome = 1 if outcome_probability > 0.5 else 0
+        cpc = cpc_model.predict(features)[0]
 
     # Ensure that the CPC score is between (or equal to) 1 and 5.
     cpc = np.clip(cpc, 1, 5)
@@ -1220,15 +1210,16 @@ def torch_prediction(model, data_loader, device):
         hour_list = []
         quality_list = []
         for _, batch in enumerate(tqdm(data_loader)):
-            data, targets, ids, hours, qualities = (
+            data, features, targets, ids, hours, qualities = (
                 batch["image"],
+                batch["features"],
                 batch["label"],
                 batch["id"],
                 batch["hour"],
                 batch["quality"],
             )
             data = data.to(device)
-            outputs = model(data)
+            outputs = model(data, features)
             outputs = torch.sigmoid(outputs)
             output_list = output_list + outputs.cpu().numpy().tolist()
             patient_id_list = patient_id_list + ids
@@ -1246,7 +1237,8 @@ def torch_predictions_for_patient(
     max_hours=72,
     min_quality=0,
     num_signals=None,
-    hours_to_use=None
+    hours_to_use=None,
+    group="",
 ):
     # Get the predictions for the patient
     patient_mask = np.array(
@@ -1265,76 +1257,89 @@ def torch_predictions_for_patient(
             raise ValueError(
                 "The torch model should only predict one value per patient."
             )
-
-    #  Get values
-    #outcome_probabilities_torch = [
-    #    outcome_probabilities_torch[hours_patients.index(hour)]
-    #    if hour in hours_patients
-    #    else np.nan
-    #    for hour in range(max_hours)
-    #]
-
-    if len(outcome_probabilities_torch) < abs(hours_to_use):
-        len_diff = abs(hours_to_use) - len(outcome_probabilities_torch)
-        aux_list = [np.nan] * len_diff
-        if len(aux_list) == abs(hours_to_use):
-            outcome_probabilities_torch = aux_list
-        else:
-            if hours_to_use < 0:
-                outcome_probabilities_torch = aux_list + outcome_probabilities_torch
-            else:
-                outcome_probabilities_torch = outcome_probabilities_torch + aux_list
-
-    if IMPUTE:
-        outcome_probabilities_torch_imputed = (
-            pd.Series(outcome_probabilities_torch, dtype=object).bfill().tolist()
-        )
-        outcome_probabilities_torch_imputed = (
-            pd.Series(outcome_probabilities_torch_imputed, dtype=object).ffill().tolist()
-        )
-    else:
-        outcome_probabilities_torch_imputed = pd.Series(
-            outcome_probabilities_torch, dtype=object
-        ).tolist()
     outcome_flags_torch = [
         1 if hour in hours_patients else 0 for hour in range(max_hours)
     ]
 
     # Aggregate the probabilities
-    weights = range(len(outcome_probabilities_torch))
-    agg_outcome_probability_torch = [
-        p * w for p, w in zip(outcome_probabilities_torch, weights) if not np.isnan(p)
-    ]
-    weight_sum = sum(
-        [w for p, w in zip(outcome_probabilities_torch, weights) if not np.isnan(p)]
-    )
-    if weight_sum == 0:
-        agg_outcome_probability_torch = 0
+    if USE_AGGREGATION:
+        if AGGREGATION_METHOD == "voting":
+            agg_outcome_probability_torch = [1 if v > DECISION_THRESHOLD else 0 for v in outcome_probabilities_torch]
+            needed_votes = int(np.ceil(len(agg_outcome_probability_torch) * VOTING_POS_MAJORITY_THRESHOLD))
+            agg_outcome_probability_torch = 1 if sum(agg_outcome_probability_torch) >= needed_votes else 0
+            outcome_probabilities_torch_imputed = [agg_outcome_probability_torch]
+            count_aux = ["voted"]
+        elif AGGREGATION_METHOD == "weighted_average":
+            weights = range(len(outcome_probabilities_torch))
+            agg_outcome_probability_torch = [
+                p * w for p, w in zip(outcome_probabilities_torch, weights) if not np.isnan(p)
+            ]
+            weight_sum = sum(
+                [w for p, w in zip(outcome_probabilities_torch, weights) if not np.isnan(p)]
+            )
+            if weight_sum == 0:
+                agg_outcome_probability_torch = 0
+            else:
+                agg_outcome_probability_torch = sum(agg_outcome_probability_torch) / weight_sum
+            outcome_probabilities_torch_imputed = [agg_outcome_probability_torch]
+            count_aux = ["weighted_average"]
     else:
-        agg_outcome_probability_torch = sum(agg_outcome_probability_torch) / weight_sum
+        # Get the hours to use for naming
+        if hours_to_use >= 0:
+            count_aux = list(range(hours_to_use))
+        else:
+            count_aux = list(range(hours_to_use, 0))
 
-    # Find the median of the signals where outcome_flags_torch is 1 and only keep the num_signals around the median
-    if num_signals is not None:
-        if num_signals > max_hours:
-            raise ValueError("num_signals should be smaller than max_hours.")
-        median = np.median(np.where(np.array(outcome_flags_torch) == 1)[0])
-        lower_bound = int(median - num_signals / 2)
-        upper_bound = int(median + num_signals / 2)
-        if lower_bound < 0:
-            upper_bound = upper_bound + abs(lower_bound)
-            lower_bound = 0
-        if upper_bound > max_hours:
-            lower_bound = lower_bound - (upper_bound - max_hours)
-            upper_bound = max_hours
-        outcome_probabilities_torch_imputed = outcome_probabilities_torch_imputed[
-            lower_bound:upper_bound
-        ]
-        outcome_flags_torch = outcome_flags_torch[lower_bound:upper_bound]
+        # Fill in the missing hours
+        if len(outcome_probabilities_torch) < abs(hours_to_use):
+            len_diff = abs(hours_to_use) - len(outcome_probabilities_torch)
+            aux_list = [np.nan] * len_diff
+            if len(aux_list) == abs(hours_to_use):
+                outcome_probabilities_torch = aux_list
+            else:
+                if hours_to_use < 0:
+                    outcome_probabilities_torch = aux_list + outcome_probabilities_torch
+                else:
+                    outcome_probabilities_torch = outcome_probabilities_torch + aux_list
+
+        # Impute the missing values
+        if IMPUTE:
+            outcome_probabilities_torch_imputed = (
+                pd.Series(outcome_probabilities_torch, dtype=object).bfill().tolist()
+            )
+            outcome_probabilities_torch_imputed = (
+                pd.Series(outcome_probabilities_torch_imputed, dtype=object).ffill().tolist()
+            )
+        else:
+            outcome_probabilities_torch_imputed = pd.Series(
+                outcome_probabilities_torch, dtype=object
+            ).tolist()
+        
+        # Find the median of the signals where outcome_flags_torch is 1 and only keep the num_signals around the median
+        if num_signals is not None:
+            if num_signals > max_hours:
+                raise ValueError("num_signals should be smaller than max_hours.")
+            median = np.median(np.where(np.array(outcome_flags_torch) == 1)[0])
+            lower_bound = int(median - num_signals / 2)
+            upper_bound = int(median + num_signals / 2)
+            if lower_bound < 0:
+                upper_bound = upper_bound + abs(lower_bound)
+                lower_bound = 0
+            if upper_bound > max_hours:
+                lower_bound = lower_bound - (upper_bound - max_hours)
+                upper_bound = max_hours
+            outcome_probabilities_torch_imputed = outcome_probabilities_torch_imputed[
+                lower_bound:upper_bound
+            ]
+            outcome_flags_torch = outcome_flags_torch[lower_bound:upper_bound]
+            count_aux = list(range(lower_bound, upper_bound))
+
+    torch_names = [f"prob_{group}_torch_{i}" for i in count_aux]
 
     return (
-        agg_outcome_probability_torch,
         outcome_probabilities_torch_imputed,
         outcome_flags_torch,
+        torch_names
     )
 
 
@@ -1345,6 +1350,7 @@ def get_tv_model(
     d_size=500,
     pretrained=False,
     channel_size=3,
+    additional_features=0,
 ):
     model = TorchvisionModel(
         model_name=model_name,
@@ -1354,6 +1360,7 @@ def get_tv_model(
         d_size=d_size,
         pretrained=pretrained,
         channel_size=channel_size,
+        additional_features=additional_features,
     )
     return model
 
@@ -1546,36 +1553,27 @@ def get_recording_features(
                 )  # 2 bipolar channels * 4 features / channel
                 sampling_frequency = (
                     utility_frequency
-                ) = channels = quality = hour = None
+                ) = channels = quality = hour = np.nan
         else:
             recording_features = float("nan") * np.ones(
                 dummy_channels
             )  # 2 bipolar channels * 4 features / channel
             sampling_frequency = (
                 utility_frequency
-            ) = channels = recording_id = quality = hour = None
+            ) = channels = recording_id = quality = hour = np.nan
     else:
         recording_features = float("nan") * np.ones(
             dummy_channels
         )  # 2 bipolar channels * 4 features / channel
         sampling_frequency = (
             utility_frequency
-        ) = channels = recording_id = quality = hour = None
+        ) = channels = recording_id = quality = hour = np.nan
 
     # Aggregate over channels
     if AGG_OVER_CHANNELS:
-        recording_feature_group_names = [f'{f.split("_c_")[0]}_{f.split("_c_")[-1].split("hour_")[-1]}' for f in recording_feature_names]
-        unique_groups = np.unique(recording_feature_group_names)
-        recording_features_agg = np.zeros(len(unique_groups))
-        for i, group in enumerate(unique_groups):
-            aux_values = recording_features[[True if group == f else False for f in recording_feature_group_names]]
-            if len(aux_values) == 0 or np.all(np.isnan(aux_values)):
-                #print(f"Group {group} not found in {recording_feature_group_names}. len(aux_values) = {len(aux_values)}")
-                recording_features_agg[i] = float("nan")
-            else:
-                recording_features_agg[i] = np.nanmean(aux_values)
-        recording_features = recording_features_agg
-        recording_feature_names = unique_groups
+        recording_feature_group_names = [f'{f.split("_c_")[0]}_hour_{f.split("_c_")[-1].split("hour_")[-1]}' for f in recording_feature_names]
+        recording_features, recording_feature_names = aggregate_features(recording_features, recording_feature_names, recording_feature_group_names)
+        channels = [f"Agg_over_{int(len(recording_feature_group_names)/len(recording_feature_names))}_channels"]
 
     return (
         recording_features,
@@ -1589,8 +1587,23 @@ def get_recording_features(
     )
 
 
+def aggregate_features(recording_features, recording_feature_names, recording_feature_group_names):
+    unique_groups = np.unique(recording_feature_group_names)
+    recording_features_agg = np.zeros(len(unique_groups))
+    for i, group in enumerate(unique_groups):
+        aux_values = recording_features[[True if group == f else False for f in recording_feature_group_names]]
+        if len(aux_values) == 0 or np.all(np.isnan(aux_values)):
+            recording_features_agg[i] = float("nan")
+        else:
+            recording_features_agg[i] = np.nanmean(aux_values)
+    recording_features = recording_features_agg
+    recording_feature_names = unique_groups
+
+    return recording_features, recording_feature_names
+
+
 # Extract features from the data.
-def get_features(data_folder, patient_id, return_as_dict=False):
+def get_features(data_folder, patient_id, return_as_dict=False, recording_features=True, normalize = False):
     # Load patient data.
     patient_metadata = load_challenge_data(data_folder, patient_id)
     recording_ids_eeg = find_recording_files(data_folder, patient_id, "EEG")
@@ -1609,62 +1622,64 @@ def get_features(data_folder, patient_id, return_as_dict=False):
         recording_ids_ecg,
         recording_ids_ref,
         recording_ids_other,
+        normalize = normalize
     )
     hospital = get_hospital(patient_metadata)
 
     # Extract recording features.
-    feature_types = ["eeg", "ecg", "ref", "other"]
-    use_flags = {"eeg": True, "ecg": USE_ECG, "ref": USE_REF, "other": USE_OTHER}
-    starts = {
-        "eeg": start_eeg,
-        "ecg": start_ecg,
-        "ref": start_ref,
-        "other": start_other,
-    }
-    hours = {"eeg": hours_eeg, "ecg": hours_ecg, "ref": hours_ref, "other": hours_other}
-    use_last_hours = {
-        "eeg": use_last_hours_eeg,
-        "ecg": use_last_hours_ecg,
-        "ref": use_last_hours_ref,
-        "other": use_last_hours_other,
-    }
-    recording_ids = {
-        "eeg": recording_ids_eeg,
-        "ecg": recording_ids_ecg,
-        "ref": recording_ids_ref,
-        "other": recording_ids_other,
-    }
-    channels_to_use = {
-        "eeg": EEG_CHANNELS,
-        "ecg": ECG_CHANNELS,
-        "ref": REF_CHANNELS,
-        "other": OTHER_CHANNELS,
-    }
-    recording_infos = {}
     feature_values = patient_features
     feature_names = patient_feature_names
-    for feature_type in feature_types:
-        if use_flags[feature_type]:
-            feature_data = process_feature(
-                feature_type,
-                starts[feature_type],
-                hours[feature_type],
-                use_last_hours[feature_type],
-                recording_ids[feature_type],
-                channels_to_use[feature_type],
-                data_folder,
-                patient_id,
-            )
-            recording_infos.update(feature_data)
-            feature_values = np.hstack(
-                (feature_values, np.hstack(feature_data[f"{feature_type}_features"]))
-            )
-            feature_names = np.hstack(
-                (
-                    feature_names,
-                    np.hstack(feature_data[f"{feature_type}_feature_names"]),
+    recording_infos = {}
+    if recording_features:
+        feature_types = ["eeg", "ecg", "ref", "other"]
+        use_flags = {"eeg": True, "ecg": USE_ECG, "ref": USE_REF, "other": USE_OTHER}
+        starts = {
+            "eeg": start_eeg,
+            "ecg": start_ecg,
+            "ref": start_ref,
+            "other": start_other,
+        }
+        hours = {"eeg": hours_eeg, "ecg": hours_ecg, "ref": hours_ref, "other": hours_other}
+        use_last_hours = {
+            "eeg": use_last_hours_eeg,
+            "ecg": use_last_hours_ecg,
+            "ref": use_last_hours_ref,
+            "other": use_last_hours_other,
+        }
+        recording_ids = {
+            "eeg": recording_ids_eeg,
+            "ecg": recording_ids_ecg,
+            "ref": recording_ids_ref,
+            "other": recording_ids_other,
+        }
+        channels_to_use = {
+            "eeg": EEG_CHANNELS,
+            "ecg": ECG_CHANNELS,
+            "ref": REF_CHANNELS,
+            "other": OTHER_CHANNELS,
+        }
+        for feature_type in feature_types:
+            if use_flags[feature_type]:
+                feature_data = process_recording_feature(
+                    feature_type,
+                    starts[feature_type],
+                    hours[feature_type],
+                    use_last_hours[feature_type],
+                    recording_ids[feature_type],
+                    channels_to_use[feature_type],
+                    data_folder,
+                    patient_id,
                 )
-            )
+                recording_infos.update(feature_data)
+                feature_values = np.hstack(
+                    (feature_values, np.hstack(feature_data[f"{feature_type}_features"]))
+                )
+                feature_names = np.hstack(
+                    (
+                        feature_names,
+                        np.hstack(feature_data[f"{feature_type}_feature_names"]),
+                    )
+                )
 
     if return_as_dict:
         return {k: v for k, v in zip(feature_names, feature_values)}
@@ -1674,7 +1689,7 @@ def get_features(data_folder, patient_id, return_as_dict=False):
 
 # Extract patient features from the data.
 def get_patient_features(
-    data, recording_ids_eeg, recording_ids_ecg, recording_ids_ref, recording_ids_other
+    data, recording_ids_eeg, recording_ids_ecg, recording_ids_ref, recording_ids_other, normalize = False
 ):
     age = get_age(data)
     sex = get_sex(data)
@@ -1707,6 +1722,13 @@ def get_patient_features(
     ecg_available = 1 if len(recording_ids_ecg) > 0 else 0
     ref_available = 1 if len(recording_ids_ref) > 0 else 0
     other_available = 1 if len(recording_ids_other) > 0 else 0
+
+    # Normalize
+    if normalize:
+        age = age / 100
+        rosc = rosc / 200
+        ttm = ttm / 36
+        last_eeg_hour = last_eeg_hour / 72
 
     features = np.array(
         (
@@ -1805,6 +1827,8 @@ class RecordingsDataset(Dataset):
         load_labels: bool = True,
         hours_to_use: int = None,
     ):
+        
+        self._precision = torch.float32
         self.hours_to_use = hours_to_use
         self.group = group
         if self.group == "EEG":
@@ -1818,11 +1842,22 @@ class RecordingsDataset(Dataset):
         else:
             raise NotImplementedError(f"Group {self.group} not implemented.")
 
+        # Load labels and features
         recording_locations_list = list()
         patient_ids_list = list()
         labels_list = list()
+        features_list = list()
         for patient_id in patient_ids:
             patient_metadata = load_challenge_data(data_folder, patient_id)
+            if INFUSE_STATIC_FEATURES:
+                (
+                    current_features,
+                    current_feature_names,
+                    hospital,
+                    recording_infos,
+                ) = get_features(data_folder, patient_id, recording_features = False, normalize = True)
+            else:
+                current_features = np.nan
             recording_ids = find_recording_files(
                 data_folder, patient_id, self.group, verbose=0
             )
@@ -1832,10 +1867,6 @@ class RecordingsDataset(Dataset):
                         recording_ids = recording_ids[: self.hours_to_use]
                     else:
                         recording_ids = recording_ids[self.hours_to_use :]
-            # recording_metadata_file = os.path.join(data_folder, patient_id, patient_id + '.tsv')
-            # recording_metadata = load_text_file(recording_metadata_file)
-            # hours = get_variable(recording_metadata, 'Hour', str)
-            # qualities = get_variable(recording_metadata, 'Quality', str)
             if load_labels:
                 current_outcome = get_outcome(patient_metadata)
             else:
@@ -1851,12 +1882,17 @@ class RecordingsDataset(Dataset):
                         recording_locations_list.append(recording_location_aux)
                         patient_ids_list.append(patient_id)
                         labels_list.append(current_outcome)
+                        features_list.append(current_features)
 
         self.recording_locations = recording_locations_list
         self.patient_ids = patient_ids_list
         self.labels = labels_list
+        self.features = features_list
+        if INFUSE_STATIC_FEATURES:
+            self.num_additional_features = len(current_features)
+        else:
+            self.num_additional_features = 0
         self.device = device
-        self._precision = torch.float32
 
     def __len__(self):
         return len(self.labels)
@@ -1880,7 +1916,7 @@ class RecordingsDataset(Dataset):
             signal_data, signal_channels, self.channels_to_use
         )
 
-        # Preprocess the data. #TODO: Make this smarter. What to do if only a few seconds are available?
+        # Preprocess the data.
         sampling_frequency_old = sampling_frequency
         signal_data, sampling_frequency = preprocess_data(
             signal_data, sampling_frequency, utility_frequency
@@ -1918,14 +1954,23 @@ class RecordingsDataset(Dataset):
         )
         spectrograms = spectrograms_resized.squeeze(0)
 
-        # Get the label.
+        # Get the other information.
         id = self.patient_ids[idx]
-        label = self.labels[idx]
         hour = get_hour(hea_file)
         quality = get_quality(hea_file)
+
+        # Get the label
+        label = self.labels[idx]
         label = torch.from_numpy(np.array(label).astype(np.float32)).to(self._precision)
+
+        # Get the static features.
+        static_features = self.features[idx]
+        static_features = np.nan_to_num(static_features, nan=-1)
+        static_features = torch.from_numpy(np.array(static_features).astype(np.float32)).to(self._precision)
+
         return_dict = {
             "image": spectrograms.to(self._precision),
+            "features": static_features,
             "label": label.to(self._precision),
             "id": id,
             "hour": hour,
@@ -1946,6 +1991,7 @@ class TorchvisionModel(torch.nn.Module):
         d_size=500,
         pretrained=False,
         channel_size=3,
+        additional_features=0,  # size of additional features
     ):
         super().__init__()
         self._d_size = d_size
@@ -1954,6 +2000,7 @@ class TorchvisionModel(torch.nn.Module):
         self.model_name = model_name
         self.num_classes = num_classes
         self.classification = classification
+        self.additional_features = additional_features
         self.model = eval(f"models.{model_name}()")
         if pretrained:
             print(f"Using pretrained {model_name} model")
@@ -1966,15 +2013,18 @@ class TorchvisionModel(torch.nn.Module):
             channel_size, 64, kernel_size=7, stride=2, padding=3, bias=False
         )
 
+        # add a linear layer for additional features
+        self.additional_layer = nn.Linear(additional_features, additional_features)
+
         if "resnet" in model_name.lower():
             num_features = self.model.fc.in_features
-            self.model.fc = nn.Linear(num_features, self.num_classes)
+            self.model.fc = nn.Linear(num_features + additional_features, self.num_classes)
         elif "densenet" in model_name.lower():
             num_features = self.model.classifier.in_features
-            self.model.classifier = nn.Linear(num_features, self.num_classes)
+            self.model.classifier = nn.Linear(num_features + additional_features, self.num_classes)
         elif "vit_b_16" in model_name.lower():
             num_features = self.model.heads.head.in_features
-            self.model.heads.head = nn.Linear(num_features, self.num_classes)
+            self.model.heads.head = nn.Linear(num_features + additional_features, self.num_classes)
         else:
             raise NotImplementedError(f"Model {model_name} not implemented")
 
@@ -1990,15 +2040,20 @@ class TorchvisionModel(torch.nn.Module):
                 del state_dict[key]
         return state_dict
 
-    def forward(self, x, classify=True):
-        return self.model.forward(x)
+    def forward(self, x, additional_x=None, classify=True):
+        x = self.model.forward(x)
+        if self.additional_features > 0:
+            assert additional_x.shape[0] == self.additional_features, "Wrong shape of additional features"
+            additional_x = self.additional_layer(additional_x)
+            x = torch.cat([x, additional_x], dim=1)  # concatenate along the feature dimension
+        return x
 
     def unpack_batch(self, batch):
-        return batch["image"], batch["label"]
+        return batch["image"], batch["features"], batch["label"]
 
     def process_batch(self, batch):
-        img, lab = self.unpack_batch(batch)
-        out = self.forward(img)
+        img, features, lab = self.unpack_batch(batch)
+        out = self.forward(img, features)
         out = out.squeeze()
         if self.classification == "binary":
             prob = torch.sigmoid(out)
@@ -2067,6 +2122,7 @@ def predict_from_batches(iteration, model, device):
         target = iteration[1]
     elif type(iteration) == dict:
         images = iteration["image"]
+        features = iteration["features"]
         target = iteration["label"]
     else:
         raise ValueError("Something is wrong. __getitem__ must return list or dict")
@@ -2075,7 +2131,7 @@ def predict_from_batches(iteration, model, device):
 
     # Get predictions
     with torch.no_grad():
-        output = model(images, classify=True)
+        output = model(images, features, classify=True)
 
     return output, target
 
@@ -2110,7 +2166,7 @@ def get_correct_hours(num_hours):
     return use_last_hours_recording, hours_recording, start_recording
 
 
-def process_feature(
+def process_recording_feature(
     feature_type,
     start,
     hours,
@@ -2158,11 +2214,19 @@ def process_feature(
         for item in feature_data.keys():
             feature_data[item].append(locals()[item.split("_", 1)[-1]])
 
+    if AGG_OVER_TIME:
+        feature_names_aux = np.array([item for row in feature_data[f"{feature_type}_feature_names"] for item in row])
+        features_aux = np.array([item for row in feature_data[f"{feature_type}_features"] for item in row])
+        recording_feature_group_names = [f'{f.split("_hour_")[0]}' for f in feature_names_aux]
+        feature_data[f"{feature_type}_features"], feature_data[f"{feature_type}_feature_names"] = aggregate_features(features_aux, feature_names_aux, recording_feature_group_names)
+        feature_data[f"{feature_type}_sampling_frequency"] = feature_data[f"{feature_type}_sampling_frequency"][0]
+        feature_data[f"{feature_type}_utility_frequency"] = feature_data[f"{feature_type}_utility_frequency"][0]
+        feature_data[f"{feature_type}_channels"] = feature_data[f"{feature_type}_channels"][0]
+        feature_data[f"{feature_type}_recording_id"] = feature_data[f"{feature_type}_recording_id"][0].split("_")[0]
+        feature_data[f"{feature_type}_hour"] = f'agg_from_{np.min(feature_data[f"{feature_type}_hour"])}_to_{np.max(feature_data[f"{feature_type}_hour"])}'
+        feature_data[f"{feature_type}_quality"] = np.nanmean(feature_data[f"{feature_type}_quality"])
+
     return feature_data
-
-
-import numpy as np
-from typing import List
 
 
 def check_artifacts(
@@ -2485,6 +2549,7 @@ def train_torch_model(
         train_auc = []
         for batch in tqdm(train_loader):
             inputs = batch["image"]
+            features = batch["features"]
             labels = batch["label"]
 
             inputs = inputs.to(device)
@@ -2492,7 +2557,7 @@ def train_torch_model(
 
             optimizer.zero_grad()
 
-            outputs = model(inputs)
+            outputs = model(inputs, features)
             loss = criterion(outputs.view(-1), labels.float())
 
             train_loss += loss.item()
@@ -2521,12 +2586,13 @@ def train_torch_model(
         with torch.no_grad():
             for batch in tqdm(val_loader):
                 inputs = batch["image"]
+                features = batch["features"]
                 labels = batch["label"]
 
                 inputs = inputs.to(device)
                 labels = labels.to(device)
 
-                outputs = model(inputs)
+                outputs = model(inputs, features)
                 loss = criterion(outputs.view(-1), labels.float())
 
                 labels_np = labels.cpu().numpy()
