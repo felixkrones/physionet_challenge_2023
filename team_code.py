@@ -82,7 +82,7 @@ HOURS_DURING_TRAINING = -24
 PARAMS_TORCH = {
     "batch_size": 16,
     "val_size": 0.1,
-    "max_epochs": 20,
+    "max_epochs": 30,
     "pretrained": True,
     "learning_rate": 0.00005,
 }
@@ -182,6 +182,7 @@ PARAMS_XGB = {"max_depth": 8, "eval_metric": "auc", "nthread": 8}
 
 # Tests
 assert (ONLY_EEG_TORCH == False) or ((ONLY_EEG_TORCH == True) and (USE_AGGREGATION == True) and (USE_TORCH == True)), "If only torch should be used, torch must be used (USE_TORCH) and aggregated (USE_AGGREGATION)"
+assert (ONLY_EEG_TORCH == False) or ((ONLY_EEG_TORCH == True) and (USE_ECG == False) and (USE_OTHER == False) and (USE_REF == False)), "If only torch should be used, no other data can be used"
 
 
 ################################################################################
@@ -678,14 +679,13 @@ def train_challenge_model(data_folder, model_folder, verbose):
             print("    {}/{}...".format(i + 1, num_patients))
 
         # Load data and extract features
-        if not ONLY_EEG_TORCH:
-            patient_metadata = load_challenge_data(data_folder, patient_ids[i])
-            (
-                current_features,
-                current_feature_names,
-                hospital,
-                recording_infos,
-            ) = get_features(data_folder, patient_ids[i])
+        patient_metadata = load_challenge_data(data_folder, patient_ids[i])
+        (
+            current_features,
+            current_feature_names,
+            hospital,
+            recording_infos,
+        ) = get_features(data_folder, patient_ids[i])
 
         if USE_TORCH:
             # Get torch predictions
@@ -1100,6 +1100,9 @@ def run_challenge_models(models, data_folder, patient_id, verbose, return_eeg_to
             features = np.hstack((features, outcome_probabilities_torch_other))
     else:
         outcome_probabilities_torch_eeg = float('nan')
+
+    if ONLY_EEG_TORCH:
+        features = np.array(outcome_probabilities_torch_eeg)
 
     # Impute missing data.
     features = features.reshape(1, -1)
@@ -2039,13 +2042,20 @@ class TorchvisionModel(torch.nn.Module):
                 state_dict[new_key] = state_dict[key]
                 del state_dict[key]
         return state_dict
-
+    
     def forward(self, x, additional_x=None, classify=True):
-        x = self.model.forward(x)
         if self.additional_features > 0:
-            assert additional_x.shape[0] == self.additional_features, "Wrong shape of additional features"
+            assert additional_x is not None, "additional_x cannot be None when using additional_features"
+            assert additional_x.shape[1] == self.additional_features, "Wrong shape of additional features"
+            features = self.model.features(x)  # Use the convolutional part only
+            if len(features.shape) == 4:
+                features = F.adaptive_avg_pool2d(features, (1, 1)).squeeze(-1).squeeze(-1)
             additional_x = self.additional_layer(additional_x)
-            x = torch.cat([x, additional_x], dim=1)  # concatenate along the feature dimension
+            features = torch.cat([features, additional_x], dim=1)  # concatenate along the feature dimension
+            x = self.model.classifier(features)  # Now, use the classifier
+        else:
+            x = self.model.forward(x)
+        
         return x
 
     def unpack_batch(self, batch):

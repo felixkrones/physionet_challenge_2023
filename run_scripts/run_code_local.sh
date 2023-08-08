@@ -1,6 +1,6 @@
 # Define and run experiment
 root=/Users/felixkrones/python_projects/data
-experiment_name=torch_-12h_-24htrain
+experiment_name=torch_-12h_-24htrain_weighted
 split_column=split
 
 split=1
