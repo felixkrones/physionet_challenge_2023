@@ -82,7 +82,7 @@ HOURS_DURING_TRAINING = -24
 PARAMS_TORCH = {
     "batch_size": 16,
     "val_size": 0.1,
-    "max_epochs": 30,
+    "max_epochs": 12,
     "pretrained": True,
     "learning_rate": 0.00005,
 }
@@ -168,8 +168,8 @@ NUM_HOURS_REF_TRAINING = HOURS_DURING_TRAINING
 
 # Model and training paramters
 C_MODEL = "rf"  # "xgb" or "rf
-AGG_OVER_CHANNELS = False
-AGG_OVER_TIME = True
+AGG_OVER_CHANNELS = True
+AGG_OVER_TIME = False
 PARAMS_RF = {
     "n_estimators": 100,
     "max_depth": 8,
