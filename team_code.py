@@ -168,8 +168,8 @@ NUM_HOURS_REF_TRAINING = HOURS_DURING_TRAINING
 
 # Model and training paramters
 C_MODEL = "rf"  # "xgb" or "rf
-AGG_OVER_CHANNELS = True
-AGG_OVER_TIME = False
+AGG_OVER_CHANNELS = False
+AGG_OVER_TIME = True
 PARAMS_RF = {
     "n_estimators": 100,
     "max_depth": 8,
@@ -177,7 +177,7 @@ PARAMS_RF = {
     "random_state": 42,
     "n_jobs": PARAMS_DEVICE["num_workers"],
 }
-CLASS_WEIGHT = None # {0:2, 1:1} # default is None
+CLASS_WEIGHT = {0:2, 1:1} # default is None
 PARAMS_XGB = {"max_depth": 8, "eval_metric": "auc", "nthread": 8}
 
 # Tests
