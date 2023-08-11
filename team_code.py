@@ -74,7 +74,7 @@ USE_AGGREGATION = False
 AGGREGATION_METHOD = "voting"
 DECISION_THRESHOLD = 0.5
 VOTING_POS_MAJORITY_THRESHOLD = 0.66
-INFUSE_STATIC_FEATURES = False
+INFUSE_STATIC_FEATURES = True
 ONLY_EEG_TORCH = False
 PARAMS_DEVICE = {"num_workers": min(26, os.cpu_count() - 2)}  # os.cpu_count()}
 LIM_HOURS_DURING_TRAINING = True  # If this is true, only the first NUM_HOURS_TO_USE hours are used for training torch
@@ -168,8 +168,8 @@ NUM_HOURS_REF_TRAINING = HOURS_DURING_TRAINING
 
 # Model and training paramters
 C_MODEL = "rf"  # "xgb" or "rf
-AGG_OVER_CHANNELS = True
-AGG_OVER_TIME = False
+AGG_OVER_CHANNELS = False
+AGG_OVER_TIME = True
 PARAMS_RF = {
     "n_estimators": 100,
     "max_depth": 8,
@@ -1222,6 +1222,7 @@ def torch_prediction(model, data_loader, device):
                 batch["quality"],
             )
             data = data.to(device)
+            features = features.to(device)
             outputs = model(data, features)
             outputs = torch.sigmoid(outputs)
             output_list = output_list + outputs.cpu().numpy().tolist()
@@ -2564,6 +2565,7 @@ def train_torch_model(
 
             inputs = inputs.to(device)
             labels = labels.to(device)
+            features = features.to(device)
 
             optimizer.zero_grad()
 
@@ -2601,6 +2603,7 @@ def train_torch_model(
 
                 inputs = inputs.to(device)
                 labels = labels.to(device)
+                features = features.to(device)
 
                 outputs = model(inputs, features)
                 loss = criterion(outputs.view(-1), labels.float())

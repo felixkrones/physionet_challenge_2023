@@ -5,8 +5,8 @@
 #SBATCH --ntasks-per-node=28
 #SBATCH --gres=gpu:1
 #SBATCH --clusters=htc
-#SBATCH --time=47:10:00
-#SBATCH --partition=medium
+#SBATCH --time=12:00:00
+#SBATCH --partition=short
 #SBATCH --job-name=physionet
 
 #SBATCH --mail-type=BEGIN,END
@@ -19,7 +19,7 @@ conda info --env
 
 # Define and run experiment
 root=/data/inet-multimodal-ai/wolf6245/data
-experiment_name=torch_-24htorch_-12h_voting
+experiment_name=torch_-24htorch_-12h_class_weight_agg_o_time_only_Infuse
 split_column=split
 
 split=1
