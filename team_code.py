@@ -272,7 +272,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 else "cpu"
             )
         else:
-            device = "cpu"
+            device = torch.device("cpu")
         print(f"Using device {device}")
         if c_model == "rf":
             print(
@@ -895,10 +895,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
 def load_challenge_models(model_folder, verbose):
     filename = os.path.join(model_folder, "models.sav")
     model = joblib.load(filename)
-    file_path_eeg = os.path.join(model_folder, "eeg", "checkpoint.pth")
-    file_path_ecg = os.path.join(model_folder, "ecg", "checkpoint.pth")
-    file_path_ref = os.path.join(model_folder, "ref", "checkpoint.pth")
-    file_path_other = os.path.join(model_folder, "other", "checkpoint.pth")
+    file_path_eeg = os.path.join(model_folder, "EEG", "checkpoint.pth")
+    file_path_ecg = os.path.join(model_folder, "ECG", "checkpoint.pth")
+    file_path_ref = os.path.join(model_folder, "REF", "checkpoint.pth")
+    file_path_other = os.path.join(model_folder, "OTHER", "checkpoint.pth")
     if USE_TORCH:
         model["torch_model_eeg"] = load_last_pt_ckpt(
             file_path_eeg, channel_size=len(EEG_CHANNELS)
@@ -958,7 +958,7 @@ def run_challenge_models(models, data_folder, patient_id, verbose, return_eeg_to
                 else "cpu"
             )
         else:
-            device = "cpu"
+            device = torch.device("cpu")
         data_set_eeg = RecordingsDataset(
             data_folder,
             patient_ids=[patient_id],
@@ -1371,14 +1371,29 @@ def get_tv_model(
 
 # Load last checkpoint
 def load_last_pt_ckpt(ckpt_path, channel_size):
-    model = get_tv_model(channel_size=channel_size)
     if os.path.isfile(ckpt_path):
+        if USE_GPU:
+            device = torch.device(
+                "cuda"
+                if torch.cuda.is_available()
+                else "mps"
+                if torch.backends.mps.is_available()
+                else "cpu"
+            )
+        else:
+            device = torch.device("cpu")
         print(f"Loading checkpoint from {ckpt_path}")
         if "pth" in ckpt_path:
-            checkpoint = torch.load(ckpt_path)
+            checkpoint = torch.load(ckpt_path, map_location=device)
             state_dic = checkpoint["model"]
+            if "additional_layer.weight" in state_dic.keys():
+                additional_features = len(state_dic["additional_layer.weight"])
+            else:
+                additional_features = 0
+            model = get_tv_model(channel_size=channel_size, additional_features=additional_features)
             model.load_state_dict(state_dic)
         elif "ckpt" in ckpt_path:
+            model = get_tv_model(channel_size=channel_size)
             model = model.load_from_checkpoint(ckpt_path)
         return model
     else:
@@ -1635,32 +1650,32 @@ def get_features(data_folder, patient_id, return_as_dict=False, recording_featur
     feature_names = patient_feature_names
     recording_infos = {}
     if recording_features:
-        feature_types = ["eeg", "ecg", "ref", "other"]
-        use_flags = {"eeg": True, "ecg": USE_ECG, "ref": USE_REF, "other": USE_OTHER}
+        feature_types = ["EEG", "ECG", "REF", "OTHER"]
+        use_flags = {"EEG": True, "ECG": USE_ECG, "REF": USE_REF, "OTHER": USE_OTHER}
         starts = {
-            "eeg": start_eeg,
-            "ecg": start_ecg,
-            "ref": start_ref,
-            "other": start_other,
+            "EEG": start_eeg,
+            "ECG": start_ecg,
+            "REF": start_ref,
+            "OTHER": start_other,
         }
-        hours = {"eeg": hours_eeg, "ecg": hours_ecg, "ref": hours_ref, "other": hours_other}
+        hours = {"EEG": hours_eeg, "ECG": hours_ecg, "REF": hours_ref, "OTHER": hours_other}
         use_last_hours = {
-            "eeg": use_last_hours_eeg,
-            "ecg": use_last_hours_ecg,
-            "ref": use_last_hours_ref,
-            "other": use_last_hours_other,
+            "EEG": use_last_hours_eeg,
+            "ECG": use_last_hours_ecg,
+            "REF": use_last_hours_ref,
+            "OTHER": use_last_hours_other,
         }
         recording_ids = {
-            "eeg": recording_ids_eeg,
-            "ecg": recording_ids_ecg,
-            "ref": recording_ids_ref,
-            "other": recording_ids_other,
+            "EEG": recording_ids_eeg,
+            "ECG": recording_ids_ecg,
+            "REF": recording_ids_ref,
+            "OTHER": recording_ids_other,
         }
         channels_to_use = {
-            "eeg": EEG_CHANNELS,
-            "ecg": ECG_CHANNELS,
-            "ref": REF_CHANNELS,
-            "other": OTHER_CHANNELS,
+            "EEG": EEG_CHANNELS,
+            "ECG": ECG_CHANNELS,
+            "REF": REF_CHANNELS,
+            "OTHER": OTHER_CHANNELS,
         }
         for feature_type in feature_types:
             if use_flags[feature_type]:
@@ -2534,7 +2549,7 @@ def train_torch_model(
     # If a checkpoint is provided, load the state of the model
     start_epoch = 0
     if checkpoint_path is not None:
-        checkpoint = torch.load(checkpoint_path)
+        checkpoint = torch.load(checkpoint_path, map_location=device)
         model.load_state_dict(checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
