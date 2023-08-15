@@ -893,12 +893,13 @@ def train_challenge_model(data_folder, model_folder, verbose):
 # Load your trained models. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function.
 def load_challenge_models(model_folder, verbose):
+    model_folder = model_folder.lower()
     filename = os.path.join(model_folder, "models.sav")
     model = joblib.load(filename)
-    file_path_eeg = os.path.join(model_folder, "EEG", "checkpoint.pth")
-    file_path_ecg = os.path.join(model_folder, "ECG", "checkpoint.pth")
-    file_path_ref = os.path.join(model_folder, "REF", "checkpoint.pth")
-    file_path_other = os.path.join(model_folder, "OTHER", "checkpoint.pth")
+    file_path_eeg = os.path.join(model_folder, "eeg", "checkpoint.pth")
+    file_path_ecg = os.path.join(model_folder, "ecg", "checkpoint.pth")
+    file_path_ref = os.path.join(model_folder, "ref", "checkpoint.pth")
+    file_path_other = os.path.join(model_folder, "other", "checkpoint.pth")
     if USE_TORCH:
         model["torch_model_eeg"] = load_last_pt_ckpt(
             file_path_eeg, channel_size=len(EEG_CHANNELS)
@@ -1181,6 +1182,8 @@ def find_recording_files(data_folder, patient_id, group="", verbose=1):
 
 
 def get_last_chkpt(model_folder):
+    model_folder = model_folder.lower()
+
     if USE_BEST_MODEL:
         chkp_name = "checkpoint_best.pth"
         print("Using best model.")
@@ -1404,6 +1407,7 @@ def load_last_pt_ckpt(ckpt_path, channel_size):
 def save_challenge_model(
     model_folder, imputer, outcome_model, cpc_model, **torch_models
 ):
+    model_folder = model_folder.lower()
     d = {"imputer": imputer, "outcome_model": outcome_model, "cpc_model": cpc_model}
     filename = os.path.join(model_folder, "models.sav")
     joblib.dump(d, filename, protocol=0)
@@ -2529,6 +2533,10 @@ def train_torch_model(
         model (torch.nn.Module): The trained model. If saving checkpoints was enabled, this will return
                                 the model state at the epoch with the lowest validation loss.
     """
+
+    # Adjust path
+    model_folder = model_folder.lower()
+    checkpoint_path = checkpoint_path.lower()
 
     # Set up criterion and optimizer
     criterion = torch.nn.BCEWithLogitsLoss()
