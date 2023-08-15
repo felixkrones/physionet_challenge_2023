@@ -82,7 +82,7 @@ HOURS_DURING_TRAINING = -24
 PARAMS_TORCH = {
     "batch_size": 16,
     "val_size": 0.1,
-    "max_epochs": 12,
+    "max_epochs": 20,
     "pretrained": True,
     "learning_rate": 0.00005,
 }
@@ -2536,7 +2536,6 @@ def train_torch_model(
 
     # Adjust path
     model_folder = model_folder.lower()
-    checkpoint_path = checkpoint_path.lower()
 
     # Set up criterion and optimizer
     criterion = torch.nn.BCEWithLogitsLoss()
@@ -2557,6 +2556,7 @@ def train_torch_model(
     # If a checkpoint is provided, load the state of the model
     start_epoch = 0
     if checkpoint_path is not None:
+        checkpoint_path = checkpoint_path.lower()
         checkpoint = torch.load(checkpoint_path, map_location=device)
         model.load_state_dict(checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
