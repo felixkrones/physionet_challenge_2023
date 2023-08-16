@@ -198,6 +198,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     print("Starting train_challenge_model...")
     print(f"CPU count: {os.cpu_count()}")
     print(f"Using: {PARAMS_DEVICE}")
+    model_folder = model_folder.lower()
 
     # Save all parameters as json file
     params_to_store = {
