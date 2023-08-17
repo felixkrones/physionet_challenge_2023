@@ -2253,7 +2253,13 @@ def process_recording_feature(
         feature_data[f"{feature_type}_sampling_frequency"] = feature_data[f"{feature_type}_sampling_frequency"][0]
         feature_data[f"{feature_type}_utility_frequency"] = feature_data[f"{feature_type}_utility_frequency"][0]
         feature_data[f"{feature_type}_channels"] = feature_data[f"{feature_type}_channels"][0]
-        feature_data[f"{feature_type}_recording_id"] = feature_data[f"{feature_type}_recording_id"][0].split("_")[0]
+        value_aux = feature_data[f"{feature_type}_recording_id"][0]
+        if isinstance(value_aux, str):
+            feature_data[f"{feature_type}_recording_id"] = value_aux.split("_")[0]
+        elif value_aux is np.nan:
+            feature_data[f"{feature_type}_recording_id"] = value_aux
+        else:
+            raise ValueError(f"Unexpected value for recording_id: {value_aux}")
         feature_data[f"{feature_type}_hour"] = f'agg_from_{np.min(feature_data[f"{feature_type}_hour"])}_to_{np.max(feature_data[f"{feature_type}_hour"])}'
         feature_data[f"{feature_type}_quality"] = np.nanmean(feature_data[f"{feature_type}_quality"])
 
