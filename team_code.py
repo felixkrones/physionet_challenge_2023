@@ -82,7 +82,7 @@ HOURS_DURING_TRAINING = -24
 PARAMS_TORCH = {
     "batch_size": 16,
     "val_size": 0.1,
-    "max_epochs": 20,
+    "max_epochs": 10,
     "pretrained": True,
     "learning_rate": 0.00005,
 }
@@ -177,7 +177,7 @@ PARAMS_RF = {
     "random_state": 42,
     "n_jobs": PARAMS_DEVICE["num_workers"],
 }
-CLASS_WEIGHT = {0:2, 1:1} # default is None
+CLASS_WEIGHT = None #{0:2, 1:1} # default is None
 PARAMS_XGB = {"max_depth": 8, "eval_metric": "auc", "nthread": 8}
 
 # Tests
