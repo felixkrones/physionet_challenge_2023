@@ -26,7 +26,11 @@ import timm
 import torch
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.impute import SimpleImputer
+from sklearn.linear_model import RidgeClassifierCV
 from sklearn.metrics import roc_auc_score
+from sktime.classification.kernel_based import RocketClassifier
+from sktime.transformations.panel.rocket import Rocket
+from sktime.utils import mlflow_sktime
 import torchvision
 import torchvision.models as models
 import torchvision.transforms as T
@@ -53,7 +57,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 # Recordings to use
 MIN_SIGNAL_LENGTH = 600  # seconds  # Minimum length of a signal to consider it
 SECONDS_TO_IGNORE_AT_START_AND_END_OF_RECORDING = 120
-NUM_HOURS_TO_USE = -12  # This currently uses the recording files, not hours
+NUM_HOURS_TO_USE = -1  # This currently uses the recording files, not hours
 
 # Filters
 FILTER_SIGNALS = True
@@ -68,14 +72,16 @@ LOW_THRESHOLD = -300
 HIGH_THRESHOLD = 300
 
 # Torch settings
-USE_TORCH = True
+USE_TORCH = False
 USE_GPU = True
-USE_AGGREGATION = False
+USE_ROCKET = True
+USE_AGGREGATION = True
 AGGREGATION_METHOD = "voting"
 DECISION_THRESHOLD = 0.5
 VOTING_POS_MAJORITY_THRESHOLD = 0.66
 INFUSE_STATIC_FEATURES = False
 ONLY_EEG_TORCH = False
+ONLY_EEG_ROCKET = True
 PARAMS_DEVICE = {"num_workers": min(26, os.cpu_count() - 2)}  # os.cpu_count()}
 LIM_HOURS_DURING_TRAINING = True  # If this is true, only the first NUM_HOURS_TO_USE hours are used for training torch
 HOURS_DURING_TRAINING = -24
@@ -183,7 +189,8 @@ PARAMS_XGB = {"max_depth": 8, "eval_metric": "auc", "nthread": 8}
 # Tests
 assert (ONLY_EEG_TORCH == False) or ((ONLY_EEG_TORCH == True) and (USE_AGGREGATION == True) and (USE_TORCH == True)), "If only torch should be used, torch must be used (USE_TORCH) and aggregated (USE_AGGREGATION)"
 assert (ONLY_EEG_TORCH == False) or ((ONLY_EEG_TORCH == True) and (USE_ECG == False) and (USE_OTHER == False) and (USE_REF == False)), "If only torch should be used, no other data can be used"
-
+assert (ONLY_EEG_ROCKET == False) or ((ONLY_EEG_ROCKET == True) and (USE_AGGREGATION == True) and (USE_ROCKET == True)), "If only rocket should be used, rocket must be used (USE_ROCKET) and aggregated (USE_AGGREGATION)"
+assert (ONLY_EEG_ROCKET == False) or ((ONLY_EEG_ROCKET == True) and (USE_ECG == False) and (USE_OTHER == False) and (USE_REF == False)), "If only rocket should be used, no other data can be used"
 
 ################################################################################
 #
@@ -217,6 +224,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         "REF_CHANNELS": REF_CHANNELS,
         "NUM_HOURS_REF": NUM_HOURS_REF,
         "USE_TORCH": USE_TORCH,
+        "USE_ROCKET": USE_ROCKET,
         "IMPUTE": IMPUTE,
         "IMPUTE_METHOD": IMPUTE_METHOD,
         "IMPUTE_CONSTANT_VALUE": IMPUTE_CONSTANT_VALUE,
@@ -232,6 +240,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         "VOTING_POS_MAJORITY_THRESHOLD": VOTING_POS_MAJORITY_THRESHOLD,
         "INFUSE_STATIC_FEATURES": INFUSE_STATIC_FEATURES,
         "ONLY_EEG_TORCH": ONLY_EEG_TORCH,
+        "ONLY_EEG_ROCKET": ONLY_EEG_ROCKET
     }
     if not os.path.exists(model_folder):
         os.makedirs(model_folder)
@@ -261,7 +270,53 @@ def train_challenge_model(data_folder, model_folder, verbose):
     torch_model_ecg = None
     torch_model_other = None
     torch_model_ref = None
+
+    if USE_ROCKET:
+        data_set_eeg_raw = RecordingsDataset(
+            data_folder,
+            patient_ids=patient_ids,
+            device='cpu',
+            group="EEG",
+            hours_to_use=NUM_HOURS_EEG,
+            raw=True
+        )
+        data_loader_eeg_raw = DataLoader(
+            data_set_eeg_raw,
+            batch_size=10,
+            num_workers=PARAMS_DEVICE["num_workers"],
+            shuffle=True,
+        )
+        clf = RidgeClassifierCV(alphas=np.logspace(-3, 3, 10)) 
+        trf = Rocket(num_kernels=1000, n_jobs=1, random_state=1) 
+        trf.fit(np.zeros((1, 19, 38400)))
+        features_train = pd.DataFrame(columns = range(2*1000))
+        labels_train = np.empty((0,))
+        for data in data_loader_eeg_raw:
+            X_train = data["signal"].cpu().detach().numpy()
+            y_train = data["label"].cpu().detach().numpy()
+            features_train = pd.concat([features_train, trf.transform(X_train)], ignore_index=True, sort=False)
+            labels_train = np.concatenate([labels_train, y_train])
+        clf.fit(features_train, labels_train)
+        print('ROCKET trained')
+        rocket_transform = trf
+        rocket_model = clf
+        (
+            output_list_rocket_eeg,
+            patient_id_list_rocket_eeg,
+            hour_list_rocket_eeg,
+            quality_list_rocket_eeg,
+        ) = rocket_prediction(trf, clf, data_loader_eeg_raw)
+    else:
+        rocket_transform = None
+        rocket_model = None
     if USE_TORCH:
+        # Split into train and validation set
+        num_val = int(num_patients * params_torch["val_size"])
+        num_train = num_patients - num_val
+        patient_ids_aux = patient_ids.copy()
+        random.Random(42).shuffle(patient_ids_aux)
+        train_ids = patient_ids_aux[:num_train]
+        val_ids = patient_ids_aux[num_train:]
         # Get device
         if USE_GPU:
             device = torch.device(
@@ -284,14 +339,6 @@ def train_challenge_model(data_folder, model_folder, verbose):
             )
         else:
             raise ValueError(f"No such c_model: {c_model}")\
-
-        # Split into train and validation set
-        num_val = int(num_patients * params_torch["val_size"])
-        num_train = num_patients - num_val
-        patient_ids_aux = patient_ids.copy()
-        random.Random(42).shuffle(patient_ids_aux)
-        train_ids = patient_ids_aux[:num_train]
-        val_ids = patient_ids_aux[num_train:]
 
         # Get EEG DL data
         if LIM_HOURS_DURING_TRAINING:
@@ -346,6 +393,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             batch_size=params_torch["batch_size"],
             d_size=len(train_loader_eeg),
             pretrained=params_torch["pretrained"],
+            trained=params_torch["pretrained"],
             channel_size=len(EEG_CHANNELS),
             additional_features=torch_dataset_eeg.num_additional_features
         )
@@ -686,6 +734,29 @@ def train_challenge_model(data_folder, model_folder, verbose):
             hospital,
             recording_infos,
         ) = get_features(data_folder, patient_ids[i])
+        
+        if USE_ROCKET:
+            (
+                outcome_probabilities_rocket_eeg,
+                outcome_flags_rocket_eeg,
+                rocket_names_eeg,
+            ) = rocket_predictions_for_patient(
+                output_list_rocket_eeg,
+                patient_id_list_rocket_eeg,
+                hour_list_rocket_eeg,
+                quality_list_rocket_eeg,
+                patient_ids[i],
+                hours_to_use=NUM_HOURS_EEG,
+                group="EEG",
+            )
+            if ONLY_EEG_ROCKET:
+                current_features = outcome_probabilities_rocket_eeg
+                current_feature_names = rocket_names_eeg
+            else:
+                current_features = np.hstack((current_features, outcome_probabilities_rocket_eeg))
+                current_feature_names = np.hstack((current_feature_names,rocket_names_eeg))
+                outcome_probabilities_rocket_eeg_aux.append(outcome_probabilities_rocket_eeg)
+                outcome_flags_rocket_eeg_aux.append(outcome_flags_rocket_eeg)
 
         if USE_TORCH:
             # Get torch predictions
@@ -834,7 +905,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     )
 
     # Train the models.
-    if ONLY_EEG_TORCH:
+    if ONLY_EEG_TORCH or ONLY_EEG_ROCKET:
         outcome_model = None
         cpc_model = None
     else:
@@ -880,6 +951,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
         imputer,
         outcome_model,
         cpc_model,
+        rocket_model,
+        rocket_transform,
         torch_model_eeg=torch_model_eeg,
         torch_model_ecg=torch_model_ecg,
         torch_model_ref=torch_model_ref,
@@ -899,6 +972,12 @@ def load_challenge_models(model_folder, verbose):
     file_path_ecg = os.path.join(model_folder, "ecg", "checkpoint.pth")
     file_path_ref = os.path.join(model_folder, "ref", "checkpoint.pth")
     file_path_other = os.path.join(model_folder, "other", "checkpoint.pth")
+    if USE_ROCKET:
+        model["rocket_eeg"] = mlflow_sktime.load_model(model_uri=os.path.join(model_folder, "eeg", "rocket"))
+        model["rocket_model_eeg"] = mlflow_sktime.load_model(model_uri=os.path.join(model_folder, "eeg", "rocket_model"))
+    else:
+        model["rocket_model_eeg"] = None
+        model["rocket_eeg"] = None
     if USE_TORCH:
         model["torch_model_eeg"] = load_last_pt_ckpt(
             file_path_eeg, channel_size=len(EEG_CHANNELS)
@@ -935,6 +1014,8 @@ def run_challenge_models(models, data_folder, patient_id, verbose, return_eeg_to
     imputer = models["imputer"]
     outcome_model = models["outcome_model"]
     cpc_model = models["cpc_model"]
+    rocket_model = models["rocket_model_eeg"]
+    rocket = models["rocket_eeg"]
     torch_model_eeg = models["torch_model_eeg"]
     torch_model_ecg = models["torch_model_ecg"]
     torch_model_ref = models["torch_model_ref"]
@@ -945,6 +1026,42 @@ def run_challenge_models(models, data_folder, patient_id, verbose, return_eeg_to
         print("Loading normal features...")
     features, _, _, _ = get_features(data_folder, patient_id)
 
+    if USE_ROCKET:
+        data_set_eeg = RecordingsDataset(
+            data_folder,
+            patient_ids=[patient_id],
+            device="cpu",
+            load_labels=False,
+            group="EEG",
+            hours_to_use=NUM_HOURS_EEG,
+            raw=True
+        )
+        data_loader_eeg = DataLoader(
+            data_set_eeg,
+            batch_size=10,
+            num_workers=PARAMS_DEVICE["num_workers"],
+            shuffle=False,
+        )
+        (
+            output_list_rocket_eeg,
+            patient_id_list_rocket_eeg,
+            hour_list_rocket_eeg,
+            quality_list_rocket_eeg,
+        ) = rocket_prediction(rocket, rocket_model, data_loader_eeg)
+        (
+            outcome_probabilities_rocket_eeg,
+            outcome_flags_rocket_eeg,
+            rocket_names_eeg,
+        ) = rocket_predictions_for_patient(
+            output_list_rocket_eeg,
+            patient_id_list_rocket_eeg,
+            hour_list_rocket_eeg,
+            quality_list_rocket_eeg,
+            patient_id,
+            hours_to_use=NUM_HOURS_EEG,
+            group="EEG",
+        )
+        features = np.hstack((features, outcome_probabilities_rocket_eeg))
     # Torch prediction
     if USE_TORCH:
         if verbose >= 2:
@@ -1103,6 +1220,8 @@ def run_challenge_models(models, data_folder, patient_id, verbose, return_eeg_to
 
     if ONLY_EEG_TORCH:
         features = np.array(outcome_probabilities_torch_eeg)
+    elif ONLY_EEG_ROCKET:
+        features = outcome_probabilities_rocket_eeg
 
     # Impute missing data.
     features = features.reshape(1, -1)
@@ -1113,6 +1232,10 @@ def run_challenge_models(models, data_folder, patient_id, verbose, return_eeg_to
     if ONLY_EEG_TORCH:
         outcome = features[0]
         outcome_probability = features[0]
+        cpc = [1 if outcome_probability < 0.5 else 5]
+    elif ONLY_EEG_ROCKET:
+        outcome = y_pred_rocket
+        outcome_probability = y_pred_rocket
         cpc = [1 if outcome_probability < 0.5 else 5]
     else:
         if verbose >= 2:
@@ -1204,6 +1327,29 @@ def get_last_chkpt(model_folder):
     return checkpoint_path
 
 
+def rocket_prediction(trf, clf, data_loader):
+    output_list = []
+    patient_id_list = []
+    hour_list = []
+    quality_list = []
+    for _, batch in enumerate(tqdm(data_loader)):
+        data, features, targets, ids, hours, qualities = (
+            batch["signal"],
+            batch["features"],
+            batch["label"],
+            batch["id"],
+            batch["hour"],
+            batch["quality"],
+        )
+        inputs = trf.transform(data.cpu().detach().numpy())
+        outputs = clf.predict(inputs)
+        output_list = output_list + outputs.tolist()
+        patient_id_list = patient_id_list + ids
+        hour_list = hour_list + list(hours.cpu().detach().numpy())
+        quality_list = quality_list + list(qualities.cpu().detach().numpy())
+    return output_list, patient_id_list, hour_list, quality_list
+
+
 def torch_prediction(model, data_loader, device):
     model.eval()
     model.to(device)
@@ -1230,6 +1376,70 @@ def torch_prediction(model, data_loader, device):
             quality_list = quality_list + list(qualities.cpu().detach().numpy())
     return output_list, patient_id_list, hour_list, quality_list
 
+def rocket_predictions_for_patient(
+    output_list,
+    patient_id_list,
+    hour_list,
+    quality_list,
+    patient_id,
+    max_hours=72,
+    min_quality=0,
+    num_signals=None,
+    hours_to_use=None,
+    group="",
+):
+    # Get the predictions for the patient
+    patient_mask = np.array(
+        [True if p == patient_id else False for p in patient_id_list]
+    )
+    if len(patient_mask) == 0:
+        outcome_probabilities_rocket = np.array([])
+        hours_patients = np.array([])
+    else:
+        outcome_probabilities_rocket = np.array(output_list)[patient_mask]
+        hours_patients = np.array(hour_list)[patient_mask].astype(int).tolist()
+        outcome_probabilities_rocket = [i for i in outcome_probabilities_rocket]
+    outcome_flags_rocket = [
+        1 if hour in hours_patients else 0 for hour in range(max_hours)
+    ]
+    # Get the hours to use for naming
+    if hours_to_use >= 0:
+        count_aux = list(range(hours_to_use))
+    else:
+        count_aux = list(range(hours_to_use, 0))
+    if len(outcome_probabilities_rocket) < abs(hours_to_use):
+        len_diff = abs(hours_to_use) - len(outcome_probabilities_rocket)
+        aux_list = [np.nan] * len_diff
+        if len(aux_list) == abs(hours_to_use):
+            outcome_probabilities_rocket = aux_list
+        else:
+            if hours_to_use < 0:
+                outcome_probabilities_rocket = aux_list + outcome_probabilities_rocket
+            else:
+                outcome_probabilities_rocket = outcome_probabilities_rocket + aux_list
+
+    # Impute the missing values
+    if IMPUTE:
+        outcome_probabilities_rocket_imputed = (
+            pd.Series(outcome_probabilities_rocket, dtype=object).bfill().tolist()
+        )
+        outcome_probabilities_rocket_imputed = (
+            pd.Series(outcome_probabilities_rocket_imputed, dtype=object).ffill().tolist()
+        )
+    else:
+        outcome_probabilities_rocket_imputed = pd.Series(
+            outcome_probabilities_rocket, dtype=object
+        ).tolist()
+    if USE_AGGREGATION:
+        outcome_probabilities_rocket_imputed = sum(outcome_probabilities_rocket_imputed)/len(outcome_probabilities_rocket_imputed)
+    rocket_names = [f"prob_{group}_rocket_{i}" for i in count_aux]
+
+    return (
+        outcome_probabilities_rocket_imputed,
+        outcome_flags_rocket,
+        rocket_names
+    )
+    
 
 def torch_predictions_for_patient(
     output_list,
@@ -1386,11 +1596,14 @@ def load_last_pt_ckpt(ckpt_path, channel_size):
 
 # Save your trained model.
 def save_challenge_model(
-    model_folder, imputer, outcome_model, cpc_model, **torch_models
+    model_folder, imputer, outcome_model, cpc_model, rocket_model, rocket_transform, **torch_models
 ):
     d = {"imputer": imputer, "outcome_model": outcome_model, "cpc_model": cpc_model}
     filename = os.path.join(model_folder, "models.sav")
     joblib.dump(d, filename, protocol=0)
+    if rocket_model is not None:
+        mlflow_sktime.save_model(sktime_model=rocket_transform, path=os.path.join(model_folder, "eeg", "rocket"))
+        mlflow_sktime.save_model(sktime_model=rocket_model, path=os.path.join(model_folder, "eeg", "rocket_model"))
     for name, torch_model in torch_models.items():
         if torch_model is not None:
             torch_model_folder = os.path.join(model_folder, name.split("_")[-1])
@@ -1829,8 +2042,10 @@ class RecordingsDataset(Dataset):
         group="EEG",
         load_labels: bool = True,
         hours_to_use: int = None,
+        raw: bool = False,
     ):
-        
+
+        self.raw = raw
         self._precision = torch.float32
         self.hours_to_use = hours_to_use
         self.group = group
@@ -1924,6 +2139,33 @@ class RecordingsDataset(Dataset):
         signal_data, sampling_frequency = preprocess_data(
             signal_data, sampling_frequency, utility_frequency
         )
+
+        # Get the other information.
+        id = self.patient_ids[idx]
+        hour = get_hour(hea_file)
+        quality = get_quality(hea_file)
+
+        # Get the label
+        label = self.labels[idx]
+        label = torch.from_numpy(np.array(label).astype(np.float32)).to(self._precision)
+
+        # Get the static features.
+        static_features = self.features[idx]
+        static_features = np.nan_to_num(static_features, nan=-1)
+        static_features = torch.from_numpy(np.array(static_features).astype(np.float32)).to(self._precision)
+
+        if self.raw:
+            return_dict = {
+                "signal": signal_data,
+                "features": static_features,
+                "label": self.labels[idx],
+                "id": id,
+                "hour": hour,
+                "quality": quality,
+            }
+
+            return return_dict
+
         points_full_hour = 60 * 60 * sampling_frequency
         available_points = signal_data.shape[1] / points_full_hour
         target_size = 901
@@ -1957,19 +2199,6 @@ class RecordingsDataset(Dataset):
         )
         spectrograms = spectrograms_resized.squeeze(0)
 
-        # Get the other information.
-        id = self.patient_ids[idx]
-        hour = get_hour(hea_file)
-        quality = get_quality(hea_file)
-
-        # Get the label
-        label = self.labels[idx]
-        label = torch.from_numpy(np.array(label).astype(np.float32)).to(self._precision)
-
-        # Get the static features.
-        static_features = self.features[idx]
-        static_features = np.nan_to_num(static_features, nan=-1)
-        static_features = torch.from_numpy(np.array(static_features).astype(np.float32)).to(self._precision)
 
         return_dict = {
             "image": spectrograms.to(self._precision),
