@@ -57,7 +57,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 # Recordings to use
 MIN_SIGNAL_LENGTH = 600  # seconds  # Minimum length of a signal to consider it
 SECONDS_TO_IGNORE_AT_START_AND_END_OF_RECORDING = 120
-NUM_HOURS_TO_USE = -1  # This currently uses the recording files, not hours
+NUM_HOURS_TO_USE = -2  # This currently uses the recording files, not hours
 
 # Filters
 FILTER_SIGNALS = True
@@ -81,7 +81,7 @@ DECISION_THRESHOLD = 0.5
 VOTING_POS_MAJORITY_THRESHOLD = 0.66
 INFUSE_STATIC_FEATURES = False
 ONLY_EEG_TORCH = False
-ONLY_EEG_ROCKET = True
+ONLY_EEG_ROCKET = False
 PARAMS_DEVICE = {"num_workers": min(26, os.cpu_count() - 2)}  # os.cpu_count()}
 LIM_HOURS_DURING_TRAINING = True  # If this is true, only the first NUM_HOURS_TO_USE hours are used for training torch
 HOURS_DURING_TRAINING = -24
@@ -1221,7 +1221,7 @@ def run_challenge_models(models, data_folder, patient_id, verbose, return_eeg_to
     if ONLY_EEG_TORCH:
         features = np.array(outcome_probabilities_torch_eeg)
     elif ONLY_EEG_ROCKET:
-        features = outcome_probabilities_rocket_eeg
+        features = np.array(outcome_probabilities_rocket_eeg)
 
     # Impute missing data.
     features = features.reshape(1, -1)
@@ -1234,8 +1234,8 @@ def run_challenge_models(models, data_folder, patient_id, verbose, return_eeg_to
         outcome_probability = features[0]
         cpc = [1 if outcome_probability < 0.5 else 5]
     elif ONLY_EEG_ROCKET:
-        outcome = y_pred_rocket
-        outcome_probability = y_pred_rocket
+        outcome = features[0]
+        outcome_probability = features[0]
         cpc = [1 if outcome_probability < 0.5 else 5]
     else:
         if verbose >= 2:
