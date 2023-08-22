@@ -70,11 +70,11 @@ HIGH_THRESHOLD = 300
 # Torch settings
 USE_TORCH = True
 USE_GPU = True
-USE_AGGREGATION = False
+USE_AGGREGATION = True
 AGGREGATION_METHOD = "voting"
 DECISION_THRESHOLD = 0.5
 VOTING_POS_MAJORITY_THRESHOLD = 0.66
-INFUSE_STATIC_FEATURES = True
+INFUSE_STATIC_FEATURES = False
 ONLY_EEG_TORCH = False
 PARAMS_DEVICE = {"num_workers": min(26, os.cpu_count() - 2)}  # os.cpu_count()}
 LIM_HOURS_DURING_TRAINING = True  # If this is true, only the first NUM_HOURS_TO_USE hours are used for training torch
