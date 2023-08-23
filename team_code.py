@@ -75,7 +75,7 @@ HIGH_THRESHOLD = 300
 USE_TORCH = False
 USE_GPU = True
 USE_ROCKET = True
-USE_AGGREGATION = True
+USE_AGGREGATION = False
 AGGREGATION_METHOD = "voting"
 DECISION_THRESHOLD = 0.5
 VOTING_POS_MAJORITY_THRESHOLD = 0.66
@@ -714,10 +714,12 @@ def train_challenge_model(data_folder, model_folder, verbose):
     recording_meta_infos = list()
     cpcs = list()
     patient_ids_aux = list()
+    outcome_probabilities_rocket_eeg_aux = list()
     outcome_probabilities_torch_eeg_aux = list()
     outcome_probabilities_torch_ecg_aux = list()
     outcome_probabilities_torch_ref_aux = list()
     outcome_probabilities_torch_other_aux = list()
+    outcome_flags_rocket_eeg_aux = list()
     outcome_flags_torch_eeg_aux = list()
     outcome_flags_torch_ecg_aux = list()
     outcome_flags_torch_ref_aux = list()
@@ -1431,6 +1433,7 @@ def rocket_predictions_for_patient(
             outcome_probabilities_rocket, dtype=object
         ).tolist()
     if USE_AGGREGATION:
+        count_aux = ['mean']
         outcome_probabilities_rocket_imputed = sum(outcome_probabilities_rocket_imputed)/len(outcome_probabilities_rocket_imputed)
     rocket_names = [f"prob_{group}_rocket_{i}" for i in count_aux]
 
