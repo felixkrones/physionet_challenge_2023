@@ -75,7 +75,7 @@ HIGH_THRESHOLD = 300
 USE_TORCH = False
 USE_GPU = True
 USE_ROCKET = True
-USE_AGGREGATION = False
+USE_AGGREGATION = True
 AGGREGATION_METHOD = "voting"
 DECISION_THRESHOLD = 0.5
 VOTING_POS_MAJORITY_THRESHOLD = 0.66
@@ -88,7 +88,7 @@ HOURS_DURING_TRAINING = -24
 PARAMS_TORCH = {
     "batch_size": 16,
     "val_size": 0.1,
-    "max_epochs": 12,
+    "max_epochs": 10,
     "pretrained": True,
     "learning_rate": 0.00005,
 }
@@ -174,8 +174,8 @@ NUM_HOURS_REF_TRAINING = HOURS_DURING_TRAINING
 
 # Model and training paramters
 C_MODEL = "rf"  # "xgb" or "rf
-AGG_OVER_CHANNELS = True
-AGG_OVER_TIME = False
+AGG_OVER_CHANNELS = False
+AGG_OVER_TIME = True
 PARAMS_RF = {
     "n_estimators": 100,
     "max_depth": 8,
@@ -183,7 +183,7 @@ PARAMS_RF = {
     "random_state": 42,
     "n_jobs": PARAMS_DEVICE["num_workers"],
 }
-CLASS_WEIGHT = {0:2, 1:1} # default is None
+CLASS_WEIGHT = None #{0:2, 1:1} # default is None
 PARAMS_XGB = {"max_depth": 8, "eval_metric": "auc", "nthread": 8}
 
 # Tests
@@ -205,6 +205,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     print("Starting train_challenge_model...")
     print(f"CPU count: {os.cpu_count()}")
     print(f"Using: {PARAMS_DEVICE}")
+    model_folder = model_folder.lower()
 
     # Save all parameters as json file
     params_to_store = {
@@ -327,7 +328,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 else "cpu"
             )
         else:
-            device = "cpu"
+            device = torch.device("cpu")
         print(f"Using device {device}")
         if c_model == "rf":
             print(
@@ -968,6 +969,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
 # Load your trained models. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function.
 def load_challenge_models(model_folder, verbose):
+    model_folder = model_folder.lower()
     filename = os.path.join(model_folder, "models.sav")
     model = joblib.load(filename)
     file_path_eeg = os.path.join(model_folder, "eeg", "checkpoint.pth")
@@ -1077,7 +1079,7 @@ def run_challenge_models(models, data_folder, patient_id, verbose, return_eeg_to
                 else "cpu"
             )
         else:
-            device = "cpu"
+            device = torch.device("cpu")
         data_set_eeg = RecordingsDataset(
             data_folder,
             patient_ids=[patient_id],
@@ -1306,6 +1308,8 @@ def find_recording_files(data_folder, patient_id, group="", verbose=1):
 
 
 def get_last_chkpt(model_folder):
+    model_folder = model_folder.lower()
+
     if USE_BEST_MODEL:
         chkp_name = "checkpoint_best.pth"
         print("Using best model.")
@@ -1370,6 +1374,7 @@ def torch_prediction(model, data_loader, device):
                 batch["quality"],
             )
             data = data.to(device)
+            features = features.to(device)
             outputs = model(data, features)
             outputs = torch.sigmoid(outputs)
             output_list = output_list + outputs.cpu().numpy().tolist()
@@ -1583,14 +1588,29 @@ def get_tv_model(
 
 # Load last checkpoint
 def load_last_pt_ckpt(ckpt_path, channel_size):
-    model = get_tv_model(channel_size=channel_size)
     if os.path.isfile(ckpt_path):
+        if USE_GPU:
+            device = torch.device(
+                "cuda"
+                if torch.cuda.is_available()
+                else "mps"
+                if torch.backends.mps.is_available()
+                else "cpu"
+            )
+        else:
+            device = torch.device("cpu")
         print(f"Loading checkpoint from {ckpt_path}")
         if "pth" in ckpt_path:
-            checkpoint = torch.load(ckpt_path)
+            checkpoint = torch.load(ckpt_path, map_location=device)
             state_dic = checkpoint["model"]
+            if "additional_layer.weight" in state_dic.keys():
+                additional_features = len(state_dic["additional_layer.weight"])
+            else:
+                additional_features = 0
+            model = get_tv_model(channel_size=channel_size, additional_features=additional_features)
             model.load_state_dict(state_dic)
         elif "ckpt" in ckpt_path:
+            model = get_tv_model(channel_size=channel_size)
             model = model.load_from_checkpoint(ckpt_path)
         return model
     else:
@@ -1601,6 +1621,7 @@ def load_last_pt_ckpt(ckpt_path, channel_size):
 def save_challenge_model(
     model_folder, imputer, outcome_model, cpc_model, rocket_model, rocket_transform, **torch_models
 ):
+    model_folder = model_folder.lower()
     d = {"imputer": imputer, "outcome_model": outcome_model, "cpc_model": cpc_model}
     filename = os.path.join(model_folder, "models.sav")
     joblib.dump(d, filename, protocol=0)
@@ -1850,32 +1871,32 @@ def get_features(data_folder, patient_id, return_as_dict=False, recording_featur
     feature_names = patient_feature_names
     recording_infos = {}
     if recording_features:
-        feature_types = ["eeg", "ecg", "ref", "other"]
-        use_flags = {"eeg": True, "ecg": USE_ECG, "ref": USE_REF, "other": USE_OTHER}
+        feature_types = ["EEG", "ECG", "REF", "OTHER"]
+        use_flags = {"EEG": True, "ECG": USE_ECG, "REF": USE_REF, "OTHER": USE_OTHER}
         starts = {
-            "eeg": start_eeg,
-            "ecg": start_ecg,
-            "ref": start_ref,
-            "other": start_other,
+            "EEG": start_eeg,
+            "ECG": start_ecg,
+            "REF": start_ref,
+            "OTHER": start_other,
         }
-        hours = {"eeg": hours_eeg, "ecg": hours_ecg, "ref": hours_ref, "other": hours_other}
+        hours = {"EEG": hours_eeg, "ECG": hours_ecg, "REF": hours_ref, "OTHER": hours_other}
         use_last_hours = {
-            "eeg": use_last_hours_eeg,
-            "ecg": use_last_hours_ecg,
-            "ref": use_last_hours_ref,
-            "other": use_last_hours_other,
+            "EEG": use_last_hours_eeg,
+            "ECG": use_last_hours_ecg,
+            "REF": use_last_hours_ref,
+            "OTHER": use_last_hours_other,
         }
         recording_ids = {
-            "eeg": recording_ids_eeg,
-            "ecg": recording_ids_ecg,
-            "ref": recording_ids_ref,
-            "other": recording_ids_other,
+            "EEG": recording_ids_eeg,
+            "ECG": recording_ids_ecg,
+            "REF": recording_ids_ref,
+            "OTHER": recording_ids_other,
         }
         channels_to_use = {
-            "eeg": EEG_CHANNELS,
-            "ecg": ECG_CHANNELS,
-            "ref": REF_CHANNELS,
-            "other": OTHER_CHANNELS,
+            "EEG": EEG_CHANNELS,
+            "ECG": ECG_CHANNELS,
+            "REF": REF_CHANNELS,
+            "OTHER": OTHER_CHANNELS,
         }
         for feature_type in feature_types:
             if use_flags[feature_type]:
@@ -2464,7 +2485,13 @@ def process_recording_feature(
         feature_data[f"{feature_type}_sampling_frequency"] = feature_data[f"{feature_type}_sampling_frequency"][0]
         feature_data[f"{feature_type}_utility_frequency"] = feature_data[f"{feature_type}_utility_frequency"][0]
         feature_data[f"{feature_type}_channels"] = feature_data[f"{feature_type}_channels"][0]
-        feature_data[f"{feature_type}_recording_id"] = feature_data[f"{feature_type}_recording_id"][0].split("_")[0]
+        value_aux = feature_data[f"{feature_type}_recording_id"][0]
+        if isinstance(value_aux, str):
+            feature_data[f"{feature_type}_recording_id"] = value_aux.split("_")[0]
+        elif value_aux is np.nan:
+            feature_data[f"{feature_type}_recording_id"] = value_aux
+        else:
+            raise ValueError(f"Unexpected value for recording_id: {value_aux}")
         feature_data[f"{feature_type}_hour"] = f'agg_from_{np.min(feature_data[f"{feature_type}_hour"])}_to_{np.max(feature_data[f"{feature_type}_hour"])}'
         feature_data[f"{feature_type}_quality"] = np.nanmean(feature_data[f"{feature_type}_quality"])
 
@@ -2746,6 +2773,9 @@ def train_torch_model(
                                 the model state at the epoch with the lowest validation loss.
     """
 
+    # Adjust path
+    model_folder = model_folder.lower()
+
     # Set up criterion and optimizer
     criterion = torch.nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=params["learning_rate"])
@@ -2765,7 +2795,8 @@ def train_torch_model(
     # If a checkpoint is provided, load the state of the model
     start_epoch = 0
     if checkpoint_path is not None:
-        checkpoint = torch.load(checkpoint_path)
+        checkpoint_path = checkpoint_path.lower()
+        checkpoint = torch.load(checkpoint_path, map_location=device)
         model.load_state_dict(checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
@@ -2796,6 +2827,7 @@ def train_torch_model(
 
             inputs = inputs.to(device)
             labels = labels.to(device)
+            features = features.to(device)
 
             optimizer.zero_grad()
 
@@ -2833,6 +2865,7 @@ def train_torch_model(
 
                 inputs = inputs.to(device)
                 labels = labels.to(device)
+                features = features.to(device)
 
                 outputs = model(inputs, features)
                 loss = criterion(outputs.view(-1), labels.float())
