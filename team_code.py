@@ -72,7 +72,7 @@ LOW_THRESHOLD = -300
 HIGH_THRESHOLD = 300
 
 # Torch settings
-USE_TORCH = False
+USE_TORCH = True
 USE_GPU = True
 USE_ROCKET = True
 USE_AGGREGATION = True
@@ -289,24 +289,30 @@ def train_challenge_model(data_folder, model_folder, verbose):
         )
         clf = RidgeClassifierCV(alphas=np.logspace(-3, 3, 10)) 
         trf = Rocket(num_kernels=1000, n_jobs=1, random_state=1) 
+        print('Start fitting ROCKET...')
         trf.fit(np.zeros((1, 19, 38400)))
         features_train = pd.DataFrame(columns = range(2*1000))
         labels_train = np.empty((0,))
+        print('Start extracting ROCKET features for RidgeClassifierCV...')
         for data in data_loader_eeg_raw:
             X_train = data["signal"].cpu().detach().numpy()
             y_train = data["label"].cpu().detach().numpy()
             features_train = pd.concat([features_train, trf.transform(X_train)], ignore_index=True, sort=False)
             labels_train = np.concatenate([labels_train, y_train])
+        print('ROCKET features extracted')
+        print('Start training RidgeClassifierCV for ROCKET...')
         clf.fit(features_train, labels_train)
-        print('ROCKET trained')
+        print('All ROCKET trained.')
         rocket_transform = trf
         rocket_model = clf
+        print('Start predicting ROCKET features ...')
         (
             output_list_rocket_eeg,
             patient_id_list_rocket_eeg,
             hour_list_rocket_eeg,
             quality_list_rocket_eeg,
         ) = rocket_prediction(trf, clf, data_loader_eeg_raw)
+        print("Done with ROCKET. ---")
     else:
         rocket_transform = None
         rocket_model = None
@@ -394,7 +400,6 @@ def train_challenge_model(data_folder, model_folder, verbose):
             batch_size=params_torch["batch_size"],
             d_size=len(train_loader_eeg),
             pretrained=params_torch["pretrained"],
-            trained=params_torch["pretrained"],
             channel_size=len(EEG_CHANNELS),
             additional_features=torch_dataset_eeg.num_additional_features
         )
@@ -1626,6 +1631,12 @@ def save_challenge_model(
     filename = os.path.join(model_folder, "models.sav")
     joblib.dump(d, filename, protocol=0)
     if rocket_model is not None:
+        # Save the rocket model, if path does not exist, create it, if file already exists, overwrite it.
+        if os.path.exists(os.path.join(model_folder, "eeg", "rocket")):
+            os.rmdir(os.path.join(model_folder, "eeg", "rocket"))
+            print("Removed old rocket model.")
+        if not os.path.exists(os.path.join(model_folder, "eeg")):
+            os.makedirs(os.path.join(model_folder, "eeg"))
         mlflow_sktime.save_model(sktime_model=rocket_transform, path=os.path.join(model_folder, "eeg", "rocket"))
         mlflow_sktime.save_model(sktime_model=rocket_model, path=os.path.join(model_folder, "eeg", "rocket_model"))
     for name, torch_model in torch_models.items():
