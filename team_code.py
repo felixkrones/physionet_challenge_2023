@@ -174,7 +174,7 @@ NUM_HOURS_REF_TRAINING = HOURS_DURING_TRAINING
 
 # Model and training paramters
 C_MODEL = "rf"  # "xgb" or "rf
-AGG_OVER_CHANNELS = False
+AGG_OVER_CHANNELS = True
 AGG_OVER_TIME = True
 PARAMS_RF = {
     "n_estimators": 100,
