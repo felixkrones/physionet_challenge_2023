@@ -57,7 +57,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 # Recordings to use
 MIN_SIGNAL_LENGTH = 600  # seconds  # Minimum length of a signal to consider it
 SECONDS_TO_IGNORE_AT_START_AND_END_OF_RECORDING = 120
-NUM_HOURS_TO_USE = -12  # This currently uses the recording files, not hours
+NUM_HOURS_TO_USE = -48  # This currently uses the recording files, not hours
 
 # Filters
 FILTER_SIGNALS = True
@@ -74,12 +74,12 @@ HIGH_THRESHOLD = 300
 # Torch settings
 USE_TORCH = True
 USE_GPU = True
-USE_ROCKET = False
+USE_ROCKET = True
 USE_AGGREGATION = True
 AGGREGATION_METHOD = "voting"
 DECISION_THRESHOLD = 0.5
 VOTING_POS_MAJORITY_THRESHOLD = 0.66
-INFUSE_STATIC_FEATURES = False
+INFUSE_STATIC_FEATURES = True
 ONLY_EEG_TORCH = False
 ONLY_EEG_ROCKET = False
 PARAMS_DEVICE = {"num_workers": min(26, os.cpu_count() - 2)}  # os.cpu_count()}
@@ -178,7 +178,7 @@ AGG_OVER_CHANNELS = True
 AGG_OVER_TIME = True
 PARAMS_RF = {
     "n_estimators": 100,
-    "max_depth": 8,
+    "max_depth": 7,
     "max_leaf_nodes": None,
     "random_state": 42,
     "n_jobs": PARAMS_DEVICE["num_workers"],
