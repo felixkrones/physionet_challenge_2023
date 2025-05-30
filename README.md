@@ -19,6 +19,12 @@ The [Challenge website](https://physionetchallenges.org/2023/#data) provides a t
 - Max hour
 - Aggregated signals as mean with heigher weights towards the end
 
+![spectrograms_example](https://github.com/user-attachments/assets/03ae1640-c175-421c-ba90-34c90a7e2304)
+An example of EEG recordings (bottom) for patient 994 at the 8th hour of channel F8 with good outcome. The top displays the corresponding spectrogram (squared amplitude in decibel units relative to peak power).
+
+![model_architecture](https://github.com/user-attachments/assets/44552e0f-8c60-43e6-a9e3-7a0d4822149f)
+A schematic diagram of our model architecture. Blue: input data; red: filters and aggregation; yellow: pre-defined features; green: trainable models.
+
 
 ## How do I run these scripts?
 
